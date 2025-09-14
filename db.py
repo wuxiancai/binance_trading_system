@@ -1,0 +1,116 @@
+import aiosqlite
+import logging
+
+INIT_SQL = """
+CREATE TABLE IF NOT EXISTS klines (
+    open_time INTEGER PRIMARY KEY,
+    close_time INTEGER NOT NULL,
+    open REAL NOT NULL,
+    high REAL NOT NULL,
+    low REAL NOT NULL,
+    close REAL NOT NULL,
+    volume REAL NOT NULL,
+    is_closed INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS indicators (
+    open_time INTEGER PRIMARY KEY,
+    ma REAL,
+    std REAL,
+    up REAL,
+    dn REAL
+);
+
+CREATE TABLE IF NOT EXISTS signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    signal TEXT NOT NULL,
+    price REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    side TEXT NOT NULL,
+    qty REAL NOT NULL,
+    price REAL,
+    order_id TEXT,
+    status TEXT
+);
+
+CREATE TABLE IF NOT EXISTS errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    where_ TEXT NOT NULL,
+    error TEXT NOT NULL
+);
+"""
+
+
+class DB:
+    def __init__(self, path: str):
+        self.path = path
+
+    async def init(self):
+        async with aiosqlite.connect(self.path) as db:
+            await db.executescript(INIT_SQL)
+            await db.commit()
+            logging.info("SQLite initialized")
+
+    async def insert_kline(self, k):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO klines(open_time, close_time, open, high, low, close, volume, is_closed) VALUES (?,?,?,?,?,?,?,?)",
+                (k.open_time, k.close_time, k.open, k.high, k.low, k.close, k.volume, int(k.is_closed)),
+            )
+            await db.commit()
+
+    async def upsert_indicator(self, open_time: int, ma: float, std: float, up: float, dn: float):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO indicators(open_time, ma, std, up, dn) VALUES (?,?,?,?,?)",
+                (open_time, ma, std, up, dn),
+            )
+            await db.commit()
+
+    async def log_signal(self, ts: int, signal: str, price: float):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO signals(ts, signal, price) VALUES (?,?,?)",
+                (ts, signal, price),
+            )
+            await db.commit()
+
+    async def log_trade(self, ts: int, side: str, qty: float, price: float | None, order_id: str | None, status: str | None):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO trades(ts, side, qty, price, order_id, status) VALUES (?,?,?,?,?,?)",
+                (ts, side, qty, price, order_id, status),
+            )
+            await db.commit()
+
+    async def log_error(self, ts: int, where_: str, error: str):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO errors(ts, where_, error) VALUES (?,?,?)",
+                (ts, where_, error),
+            )
+            await db.commit()
+
+    async def update_trade_status_on_close(self, close_side: str):
+        """当平仓时，将相关的开仓交易状态从NEW改为OVER"""
+        async with aiosqlite.connect(self.path) as db:
+            # 根据平仓方向确定要更新的开仓方向
+            if close_side in ("SELL_CLOSE", "SELL"):  # 平多仓
+                open_sides = ("BUY", "BUY_OPEN")
+            elif close_side in ("BUY_CLOSE", "BUY"):  # 平空仓
+                open_sides = ("SELL", "SELL_OPEN")
+            else:
+                return
+            
+            # 更新最近的相关开仓交易状态为OVER
+            await db.execute(
+                "UPDATE trades SET status = 'OVER' WHERE side IN (?, ?) AND status = 'NEW' ORDER BY ts DESC LIMIT 1",
+                open_sides
+            )
+            await db.commit()
