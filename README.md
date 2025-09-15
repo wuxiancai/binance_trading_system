@@ -102,30 +102,142 @@ deactivate
 
 ### 环境变量配置
 
-部署完成后，需要编辑配置文件：
+系统支持通过环境变量覆盖默认配置。有两种方式设置环境变量：
+
+#### 方式一：使用 .env 文件（推荐）
+
+部署完成后，创建并编辑配置文件：
 
 ```bash
+# 复制示例配置文件
+cp $HOME/binance_trading_system/.env.example $HOME/binance_trading_system/.env
+
+# 编辑配置文件
 nano $HOME/binance_trading_system/.env
 ```
 
-重要配置项：
+然后在启动前加载环境变量：
 
 ```bash
-# 运行模式
-DRY_RUN=1                    # 1=模拟交易，0=真实交易
-USE_TESTNET=1               # 1=测试网，0=主网
+# 加载 .env 文件中的环境变量
+cd $HOME/binance_trading_system
+export $(grep -v '^#' .env | xargs)
 
-# API 配置（真实交易时必须配置）
-BINANCE_API_KEY=your_api_key_here
-BINANCE_API_SECRET=your_api_secret_here
-
-# 交易配置
-SYMBOL=BTCUSDT             # 交易对
-INTERVAL=15m               # K线周期
-LEVERAGE=5                 # 杠杆倍数
-STOP_LOSS_PCT=0.02         # 止损比例
-MAX_POSITION_PCT=0.10      # 最大仓位比例
+# 启动系统
+python main.py
 ```
+
+#### 方式二：直接设置环境变量
+
+```bash
+# 设置环境变量
+export USE_TESTNET=1
+export SYMBOL=BTCUSDT
+export INTERVAL=15m
+
+# 启动系统
+python main.py
+```
+
+#### 重要配置项说明
+
+##### 🔧 基础应用参数
+```bash
+LOG_LEVEL=INFO            # 日志等级：DEBUG/INFO/WARNING/ERROR
+DB_PATH=trader.db         # SQLite 数据库文件路径
+TZ=Asia/Shanghai          # 时区设置（用于日志显示）
+```
+
+##### 🔑 交易所配置
+```bash
+# API 配置（真实交易时必须配置）
+BINANCE_API_KEY=your_api_key_here      # 币安 API Key
+BINANCE_API_SECRET=your_api_secret_here # 币安 API Secret
+USE_TESTNET=1             # 1=测试网，0=主网
+SYMBOL=BTCUSDT            # 交易对
+INTERVAL=15m              # K线周期（1m/5m/15m/1h/4h/1d等）
+WINDOW=20                 # 布林带窗口期
+```
+
+##### 📊 策略与风控参数
+```bash
+STOP_LOSS_PCT=0.02        # 止损比例（0.02 = 2%）
+MAX_POSITION_PCT=0.10     # 最大仓位比例（0.10 = 10%）
+LEVERAGE=5                # 杠杆倍数
+ONLY_ON_CLOSE=1           # 仅在K线收盘时处理信号（1=是，0=否）
+STOP_LOSS_ENABLED=1       # 开仓后自动挂止损单（1=是，0=否）
+```
+
+##### 📈 技术指标参数
+```bash
+BOLL_MULTIPLIER=2.0       # 布林带倍数
+BOLL_DDOF=0               # 标准差自由度
+INDICATOR_MAX_ROWS=200    # 指标缓存最大行数
+```
+
+##### 🌐 网络与连接参数
+```bash
+WS_PING_INTERVAL=20       # WebSocket 心跳间隔（秒）
+WS_PING_TIMEOUT=60        # WebSocket 心跳超时（秒）
+WS_BACKOFF_INITIAL=1      # 重连初始退避时间（秒）
+WS_BACKOFF_MAX=60         # 重连最大退避时间（秒）
+RECV_WINDOW=5000          # REST API 接收窗口（毫秒）
+HTTP_TIMEOUT=30           # HTTP 请求超时（秒）
+```
+
+##### 🎯 交易精度参数
+```bash
+QTY_PRECISION=3           # 数量精度（小数位数）
+PRICE_ROUND=2             # 价格保留小数位
+STOP_LOSS_WORKING_TYPE=CONTRACT_PRICE  # 止损触发价格类型
+```
+
+##### 🔗 端点配置（高级用户）
+```bash
+# 通常无需修改，系统会根据 USE_TESTNET 自动选择
+REST_BASE=                # REST API 基础地址（留空使用默认）
+WS_BASE=                  # WebSocket 基础地址（留空使用默认）
+```
+
+#### 配置示例
+
+##### 开发测试配置
+```bash
+# 测试网 + 模拟交易
+USE_TESTNET=1
+SYMBOL=BTCUSDT
+INTERVAL=15m
+WINDOW=20
+STOP_LOSS_PCT=0.02
+MAX_POSITION_PCT=0.10
+LEVERAGE=5
+ONLY_ON_CLOSE=1
+STOP_LOSS_ENABLED=1
+LOG_LEVEL=DEBUG
+```
+
+##### 生产环境配置
+```bash
+# 主网 + 真实交易（请确保 API Key 权限正确）
+USE_TESTNET=0
+BINANCE_API_KEY=your_mainnet_api_key
+BINANCE_API_SECRET=your_mainnet_api_secret
+SYMBOL=BTCUSDT
+INTERVAL=15m
+LEVERAGE=3
+STOP_LOSS_PCT=0.015
+MAX_POSITION_PCT=0.05
+LOG_LEVEL=INFO
+TZ=Asia/Shanghai
+```
+
+#### 配置优先级
+
+系统按以下优先级加载配置：
+1. **环境变量**（最高优先级）
+2. **代码中的默认值**（最低优先级）
+
+这意味着环境变量会覆盖代码中的默认配置。
 
 ## 🔧 服务管理
 
@@ -168,6 +280,47 @@ sudo systemctl is-enabled binance_trading_system
 
 # 查看端口占用
 sudo netstat -tlnp | grep :5000
+```
+
+### 服务环境变量配置
+
+systemd 服务会自动读取项目目录下的 `.env` 文件。如需修改配置：
+
+#### 方法一：修改 .env 文件（推荐）
+
+```bash
+# 编辑环境变量文件
+nano $HOME/binance_trading_system/.env
+
+# 重启服务使配置生效
+sudo systemctl restart binance_trading_system
+```
+
+#### 方法二：修改 systemd 服务文件
+
+```bash
+# 编辑服务文件
+sudo systemctl edit binance_trading_system
+
+# 在编辑器中添加环境变量
+[Service]
+Environment="USE_TESTNET=0"
+Environment="SYMBOL=ETHUSDT"
+Environment="INTERVAL=5m"
+
+# 重新加载并重启服务
+sudo systemctl daemon-reload
+sudo systemctl restart binance_trading_system
+```
+
+#### 查看服务环境变量
+
+```bash
+# 查看服务的环境变量
+sudo systemctl show binance_trading_system --property=Environment
+
+# 查看服务配置
+sudo systemctl cat binance_trading_system
 ```
 
 ## 🌐 Web 界面访问
@@ -249,7 +402,44 @@ cp $HOME/binance_trading_system/.env /backup/env_$(date +%Y%m%d_%H%M%S).backup
    chmod -R u+rw $HOME/binance_trading_system
    ```
 
-4. **Python 依赖问题**
+4. **环境变量配置问题**
+   ```bash
+   # 检查 .env 文件是否存在
+   ls -la $HOME/binance_trading_system/.env
+   
+   # 检查环境变量格式（不应有空格）
+   cat $HOME/binance_trading_system/.env | grep -E "^[A-Z_]+=.*"
+   
+   # 测试环境变量加载
+   cd $HOME/binance_trading_system
+   export $(grep -v '^#' .env | xargs)
+   echo $USE_TESTNET
+   
+   # 验证配置是否正确
+   python -c "from config import load_config; print(load_config())"
+   ```
+
+5. **API 连接问题**
+   ```bash
+   # 检查网络连接
+   curl -I https://testnet.binancefuture.com/fapi/v1/ping
+   
+   # 检查 API 密钥配置
+   grep "BINANCE_API" $HOME/binance_trading_system/.env
+   
+   # 测试 API 连接
+   cd $HOME/binance_trading_system && source .venv/bin/activate
+   python -c "
+   import os
+   from config import load_config
+   config = load_config()
+   print(f'使用测试网: {config.use_testnet}')
+   print(f'API Key: {config.api_key[:10]}...')
+   print(f'REST 端点: {config.rest_base}')
+   "
+   ```
+
+6. **Python 依赖问题**
    ```bash
    # 重新安装依赖
    cd $HOME/binance_trading_system && source .venv/bin/activate && pip install -r requirements.txt
@@ -273,9 +463,56 @@ rm -rf $HOME/binance_trading_system
 # 重新执行部署脚本
 ./deploy/auto_deploy.sh
 
-# 恢复数据
+# 恢复数据和配置
 cp /tmp/trader.db $HOME/binance_trading_system/
 cp /tmp/.env $HOME/binance_trading_system/
+
+# 重新加载环境变量并重启服务
+cd $HOME/binance_trading_system
+export $(grep -v '^#' .env | xargs)
+sudo systemctl restart binance_trading_system
+```
+
+### 配置文件管理
+
+#### 备份配置
+```bash
+# 创建配置备份
+mkdir -p ~/backups
+cp $HOME/binance_trading_system/.env ~/backups/.env.$(date +%Y%m%d_%H%M%S)
+
+# 备份数据库
+cp $HOME/binance_trading_system/trader.db ~/backups/trader.db.$(date +%Y%m%d_%H%M%S)
+```
+
+#### 恢复配置
+```bash
+# 恢复环境变量配置
+cp ~/backups/.env.20240101_120000 $HOME/binance_trading_system/.env
+
+# 重新加载配置
+cd $HOME/binance_trading_system
+export $(grep -v '^#' .env | xargs)
+
+# 重启服务
+sudo systemctl restart binance_trading_system
+```
+
+#### 配置验证
+```bash
+# 验证配置文件语法
+cd $HOME/binance_trading_system
+python -c "
+try:
+    from config import load_config
+    config = load_config()
+    print('✅ 配置加载成功')
+    print(f'交易对: {config.symbol}')
+    print(f'测试网: {config.use_testnet}')
+    print(f'杠杆: {config.leverage}')
+except Exception as e:
+    print(f'❌ 配置错误: {e}')
+"
 ```
 
 ## 📞 技术支持
