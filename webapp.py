@@ -118,67 +118,67 @@ def _compute_current_position(db_path: str) -> Dict[str, Any]:
 
 
 def _compute_last_closed_pnl(db_path: str) -> Optional[Dict[str, Any]]:
-    """Find the latest *_CLOSE trade and pair it with its previous OPEN to compute realized PnL."""
+    """Find the latest completed trade pair to compute realized PnL."""
     with _connect(db_path) as conn:
-        # latest close
+        # 获取所有交易记录，按时间排序
         cur = conn.execute(
-            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY_CLOSE','SELL_CLOSE') ORDER BY ts DESC LIMIT 1"
+            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY','SELL','BUY_CLOSE','SELL_CLOSE','BUY_OPEN','SELL_OPEN') ORDER BY ts ASC"
         )
-        last_close = cur.fetchone()
-        if not last_close:
-            return None
-        close_side = last_close["side"]
-        close_ts = last_close["ts"]
-        close_price = float(last_close["price"]) if last_close["price"] is not None else None
-        qty = float(last_close["qty"]) if last_close["qty"] is not None else 0.0
-
-        if close_side == "SELL_CLOSE":
-            # long closed; find preceding BUY/BUY_OPEN before close_ts
-            cur = conn.execute(
-                "SELECT ts, price, qty FROM trades WHERE ts <= ? AND side IN ('BUY','BUY_OPEN') ORDER BY ts DESC LIMIT 1",
-                (close_ts,),
-            )
-            open_row = cur.fetchone()
-            if not open_row or close_price is None:
-                return None
-            open_price = float(open_row["price"]) if open_row["price"] is not None else None
-            if open_price is None:
-                return None
-            pnl = (close_price - open_price) * qty
-            return {
-                "side": "long",
-                "entry_price": open_price,
-                "exit_price": close_price,
-                "qty": qty,
-                "pnl": pnl,
-                "open_time": open_row["ts"],
-                "open_time_local": _fmt_ts(open_row["ts"]),
-                "close_time": close_ts,
-                "close_time_local": _fmt_ts(close_ts),
-            }
-        else:  # BUY_CLOSE => short closed
-            cur = conn.execute(
-                "SELECT ts, price, qty FROM trades WHERE ts <= ? AND side IN ('SELL','SELL_OPEN') ORDER BY ts DESC LIMIT 1",
-                (close_ts,),
-            )
-            open_row = cur.fetchone()
-            if not open_row or close_price is None:
-                return None
-            open_price = float(open_row["price"]) if open_row["price"] is not None else None
-            if open_price is None:
-                return None
-            pnl = (open_price - close_price) * qty
-            return {
-                "side": "short",
-                "entry_price": open_price,
-                "exit_price": close_price,
-                "qty": qty,
-                "pnl": pnl,
-                "open_time": open_row["ts"],
-                "open_time_local": _fmt_ts(open_row["ts"]),
-                "close_time": close_ts,
-                "close_time_local": _fmt_ts(close_ts),
-            }
+        all_trades = cur.fetchall()
+        
+        # 找到最后一个完成的交易对
+        last_completed = None
+        i = 0
+        while i < len(all_trades) - 1:
+            trade1 = all_trades[i]
+            trade2 = all_trades[i + 1]
+            
+            side1 = trade1["side"]
+            side2 = trade2["side"]
+            price1 = float(trade1["price"]) if trade1["price"] is not None else None
+            price2 = float(trade2["price"]) if trade2["price"] is not None else None
+            qty1 = float(trade1["qty"]) if trade1["qty"] is not None else 0.0
+            qty2 = float(trade2["qty"]) if trade2["qty"] is not None else 0.0
+            
+            if price1 is None or price2 is None:
+                i += 1
+                continue
+            
+            # 检查是否为有效的交易对
+            # BUY -> SELL (多仓盈亏)
+            if side1 in ("BUY", "BUY_OPEN") and side2 in ("SELL", "SELL_CLOSE"):
+                pnl = (price2 - price1) * min(qty1, qty2)
+                last_completed = {
+                    "side": "long",
+                    "entry_price": price1,
+                    "exit_price": price2,
+                    "qty": min(qty1, qty2),
+                    "pnl": pnl,
+                    "open_time": trade1["ts"],
+                    "open_time_local": _fmt_ts(trade1["ts"]),
+                    "close_time": trade2["ts"],
+                    "close_time_local": _fmt_ts(trade2["ts"]),
+                }
+                i += 2
+            # SELL -> BUY (空仓盈亏)  
+            elif side1 in ("SELL", "SELL_OPEN") and side2 in ("BUY", "BUY_CLOSE"):
+                pnl = (price1 - price2) * min(qty1, qty2)
+                last_completed = {
+                    "side": "short",
+                    "entry_price": price1,
+                    "exit_price": price2,
+                    "qty": min(qty1, qty2),
+                    "pnl": pnl,
+                    "open_time": trade1["ts"],
+                    "open_time_local": _fmt_ts(trade1["ts"]),
+                    "close_time": trade2["ts"],
+                    "close_time_local": _fmt_ts(trade2["ts"]),
+                }
+                i += 2
+            else:
+                i += 1
+        
+        return last_completed
 
 
 def _latest_price(db_path: str) -> Optional[float]:
@@ -194,119 +194,125 @@ def _latest_price(db_path: str) -> Optional[float]:
 
 
 def _get_pnl_records(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """获取所有平仓交易的盈亏记录"""
+    """获取所有交易的盈亏记录"""
     records = []
     with _connect(db_path) as conn:
-        # 获取所有平仓交易
+        # 获取所有交易记录，按时间排序
         cur = conn.execute(
-            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY_CLOSE','SELL_CLOSE') ORDER BY ts DESC LIMIT ?",
-            (limit,)
+            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY','SELL','BUY_CLOSE','SELL_CLOSE','BUY_OPEN','SELL_OPEN') ORDER BY ts ASC"
         )
-        close_trades = cur.fetchall()
+        all_trades = cur.fetchall()
         
-        for close_trade in close_trades:
-            close_side = close_trade["side"]
-            close_ts = close_trade["ts"]
-            close_price = float(close_trade["price"]) if close_trade["price"] is not None else None
-            qty = float(close_trade["qty"]) if close_trade["qty"] is not None else 0.0
+        # 配对交易计算盈亏
+        i = 0
+        while i < len(all_trades) - 1:
+            trade1 = all_trades[i]
+            trade2 = all_trades[i + 1]
             
-            if close_price is None:
+            side1 = trade1["side"]
+            side2 = trade2["side"]
+            price1 = float(trade1["price"]) if trade1["price"] is not None else None
+            price2 = float(trade2["price"]) if trade2["price"] is not None else None
+            qty1 = float(trade1["qty"]) if trade1["qty"] is not None else 0.0
+            qty2 = float(trade2["qty"]) if trade2["qty"] is not None else 0.0
+            
+            if price1 is None or price2 is None:
+                i += 1
                 continue
-                
-            if close_side == "SELL_CLOSE":
-                # 多仓平仓，找前面的开多仓
-                cur2 = conn.execute(
-                    "SELECT ts, price FROM trades WHERE ts <= ? AND side IN ('BUY','BUY_OPEN') ORDER BY ts DESC LIMIT 1",
-                    (close_ts,)
-                )
-                open_row = cur2.fetchone()
-                if open_row and open_row["price"] is not None:
-                    open_price = float(open_row["price"])
-                    pnl = (close_price - open_price) * qty
-                    records.append({
-                        "ts": close_ts,
-                        "ts_local": _fmt_ts(close_ts),
-                        "side": "long",
-                        "entry_price": open_price,
-                        "exit_price": close_price,
-                        "qty": qty,
-                        "pnl": pnl
-                    })
-            else:  # BUY_CLOSE
-                # 空仓平仓，找前面的开空仓
-                cur2 = conn.execute(
-                    "SELECT ts, price FROM trades WHERE ts <= ? AND side IN ('SELL','SELL_OPEN') ORDER BY ts DESC LIMIT 1",
-                    (close_ts,)
-                )
-                open_row = cur2.fetchone()
-                if open_row and open_row["price"] is not None:
-                    open_price = float(open_row["price"])
-                    pnl = (open_price - close_price) * qty
-                    records.append({
-                        "ts": close_ts,
-                        "ts_local": _fmt_ts(close_ts),
-                        "side": "short",
-                        "entry_price": open_price,
-                        "exit_price": close_price,
-                        "qty": qty,
-                        "pnl": pnl
-                    })
-    return records
+            
+            # 检查是否为有效的交易对
+            pnl = 0.0
+            
+            # BUY -> SELL (多仓盈亏)
+            if side1 in ("BUY", "BUY_OPEN") and side2 in ("SELL", "SELL_CLOSE"):
+                pnl = (price2 - price1) * min(qty1, qty2)
+                records.append({
+                    "ts": trade2["ts"],
+                    "ts_local": _fmt_ts(trade2["ts"]),
+                    "side": "long",
+                    "entry_price": price1,
+                    "exit_price": price2,
+                    "qty": min(qty1, qty2),
+                    "pnl": pnl
+                })
+                # 跳过已配对的交易
+                i += 2
+            # SELL -> BUY (空仓盈亏)  
+            elif side1 in ("SELL", "SELL_OPEN") and side2 in ("BUY", "BUY_CLOSE"):
+                pnl = (price1 - price2) * min(qty1, qty2)
+                records.append({
+                    "ts": trade2["ts"],
+                    "ts_local": _fmt_ts(trade2["ts"]),
+                    "side": "short",
+                    "entry_price": price1,
+                    "exit_price": price2,
+                    "qty": min(qty1, qty2),
+                    "pnl": pnl
+                })
+                # 跳过已配对的交易
+                i += 2
+            else:
+                i += 1
+        
+        # 按时间倒序排列，限制数量
+        records.sort(key=lambda x: x["ts"], reverse=True)
+        return records[:limit]
 
 
 def _get_daily_stats(db_path: str, days: int = 7) -> List[Dict[str, Any]]:
     """获取每日交易统计"""
     stats = []
     with _connect(db_path) as conn:
-        # 获取最近几天的平仓交易
+        # 获取所有交易记录，按时间排序
         cur = conn.execute(
-            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY_CLOSE','SELL_CLOSE') ORDER BY ts DESC"
+            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY','SELL','BUY_CLOSE','SELL_CLOSE','BUY_OPEN','SELL_OPEN') ORDER BY ts ASC"
         )
-        close_trades = cur.fetchall()
+        all_trades = cur.fetchall()
         
         # 按日期分组统计
         daily_data = {}
         
-        for close_trade in close_trades:
-            close_side = close_trade["side"]
-            close_ts = close_trade["ts"]
-            close_price = float(close_trade["price"]) if close_trade["price"] is not None else None
-            qty = float(close_trade["qty"]) if close_trade["qty"] is not None else 0.0
+        # 配对交易计算盈亏
+        i = 0
+        while i < len(all_trades) - 1:
+            trade1 = all_trades[i]
+            trade2 = all_trades[i + 1]
             
-            if close_price is None:
+            side1 = trade1["side"]
+            side2 = trade2["side"]
+            price1 = float(trade1["price"]) if trade1["price"] is not None else None
+            price2 = float(trade2["price"]) if trade2["price"] is not None else None
+            qty1 = float(trade1["qty"]) if trade1["qty"] is not None else 0.0
+            qty2 = float(trade2["qty"]) if trade2["qty"] is not None else 0.0
+            
+            if price1 is None or price2 is None:
+                i += 1
                 continue
-                
-            # 获取日期
-            date_str = _fmt_ts(close_ts).split(' ')[0]  # 只取日期部分
             
-            if date_str not in daily_data:
-                daily_data[date_str] = {'trades': 0, 'total_pnl': 0.0}
-            
-            # 计算盈亏
+            # 检查是否为有效的交易对
             pnl = 0.0
-            if close_side == "SELL_CLOSE":
-                # 多仓平仓
-                cur2 = conn.execute(
-                    "SELECT price FROM trades WHERE ts <= ? AND side IN ('BUY','BUY_OPEN') ORDER BY ts DESC LIMIT 1",
-                    (close_ts,)
-                )
-                open_row = cur2.fetchone()
-                if open_row and open_row["price"] is not None:
-                    open_price = float(open_row["price"])
-                    pnl = (close_price - open_price) * qty
-            else:  # BUY_CLOSE
-                # 空仓平仓
-                cur2 = conn.execute(
-                    "SELECT price FROM trades WHERE ts <= ? AND side IN ('SELL','SELL_OPEN') ORDER BY ts DESC LIMIT 1",
-                    (close_ts,)
-                )
-                open_row = cur2.fetchone()
-                if open_row and open_row["price"] is not None:
-                    open_price = float(open_row["price"])
-                    pnl = (open_price - close_price) * qty
+            trade_date = None
             
-            daily_data[date_str]['trades'] += 1
-            daily_data[date_str]['total_pnl'] += pnl
+            # BUY -> SELL (多仓盈亏)
+            if side1 in ("BUY", "BUY_OPEN") and side2 in ("SELL", "SELL_CLOSE"):
+                pnl = (price2 - price1) * min(qty1, qty2)
+                trade_date = _fmt_ts(trade2["ts"]).split(' ')[0]
+            # SELL -> BUY (空仓盈亏)  
+            elif side1 in ("SELL", "SELL_OPEN") and side2 in ("BUY", "BUY_CLOSE"):
+                pnl = (price1 - price2) * min(qty1, qty2)
+                trade_date = _fmt_ts(trade2["ts"]).split(' ')[0]
+            
+            if trade_date:
+                if trade_date not in daily_data:
+                    daily_data[trade_date] = {'trades': 0, 'total_pnl': 0.0}
+                
+                daily_data[trade_date]['trades'] += 1
+                daily_data[trade_date]['total_pnl'] += pnl
+                
+                # 跳过已配对的交易
+                i += 2
+            else:
+                i += 1
         
         # 转换为列表并计算利润率
         for date_str, data in sorted(daily_data.items(), reverse=True)[:days]:
@@ -612,7 +618,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                        return Number(pnl) >= 0 ? 'pnl-profit' : 'pnl-loss';
                      };
 
-                     // Daily Stats
+                     // Daily Stats (placed right after position)
                      const statsRows = (data.daily_stats || []).map(s => `<tr><td>${s.date}</td><td>${s.trades_count}</td><td><span class="${pnlClass(s.total_pnl)}">${fmt(s.total_pnl)}</span></td><td><span class="${pnlClass(s.profit_rate)}">${fmt(s.profit_rate)}%</span></td></tr>`).join('');
                      cards.push(`
                        <div class="card">
@@ -625,7 +631,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                         </div>
                        </div>`);
  
-                     // Recent trades (placed after position, before signals)
+                     // Recent trades
                     const statusClass = (status) => {
                       if (!status) return '';
                       const s = String(status).toUpperCase();
