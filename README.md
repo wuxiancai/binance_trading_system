@@ -143,7 +143,7 @@ python main.py
 
 ##### 🔧 基础应用参数
 ```bash
-LOG_LEVEL=INFO            # 日志等级：DEBUG/INFO/WARNING/ERROR
+LOG_LEVEL=DEBUG           # 日志等级：DEBUG/INFO/WARNING/ERROR
 DB_PATH=trader.db         # SQLite 数据库文件路径
 TZ=Asia/Shanghai          # 时区设置（用于日志显示）
 ```
@@ -162,8 +162,8 @@ WINDOW=20                 # 布林带窗口期
 ##### 📊 策略与风控参数
 ```bash
 STOP_LOSS_PCT=0.02        # 止损比例（0.02 = 2%）
-MAX_POSITION_PCT=0.10     # 最大仓位比例（0.10 = 10%）
-LEVERAGE=5                # 杠杆倍数
+MAX_POSITION_PCT=1.0      # 最大仓位比例（1.0 = 100%）
+LEVERAGE=10               # 杠杆倍数
 ONLY_ON_CLOSE=1           # 仅在K线收盘时处理信号（1=是，0=否）
 STOP_LOSS_ENABLED=1       # 开仓后自动挂止损单（1=是，0=否）
 ```
@@ -209,8 +209,8 @@ SYMBOL=BTCUSDT
 INTERVAL=15m
 WINDOW=20
 STOP_LOSS_PCT=0.02
-MAX_POSITION_PCT=0.10
-LEVERAGE=5
+MAX_POSITION_PCT=1.0
+LEVERAGE=10
 ONLY_ON_CLOSE=1
 STOP_LOSS_ENABLED=1
 LOG_LEVEL=DEBUG
@@ -224,10 +224,10 @@ BINANCE_API_KEY=your_mainnet_api_key
 BINANCE_API_SECRET=your_mainnet_api_secret
 SYMBOL=BTCUSDT
 INTERVAL=15m
-LEVERAGE=3
+LEVERAGE=10
 STOP_LOSS_PCT=0.015
-MAX_POSITION_PCT=0.05
-LOG_LEVEL=INFO
+MAX_POSITION_PCT=1.0
+LOG_LEVEL=DEBUG
 TZ=Asia/Shanghai
 ```
 
