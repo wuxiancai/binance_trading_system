@@ -41,13 +41,6 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=${SERVICE_NAME}
 
-# 安全配置
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=${DEPLOY_DIR}
-
 # 资源限制
 LimitNOFILE=65536
 LimitNPROC=4096
