@@ -83,38 +83,39 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
         return rows
 
 
-def _compute_current_position(db_path: str) -> Dict[str, Any]:
-    """Derive current position from latest trades.
-    Heuristic:
-      - Latest BUY or BUY_OPEN -> long
-      - Latest SELL or SELL_OPEN -> short
-      - Latest *_CLOSE with no later OPEN -> flat
-    """
-    with _connect(db_path) as conn:
-        cur = conn.execute(
-            "SELECT ts, side, qty, price FROM trades ORDER BY ts DESC LIMIT 200"
-        )
-        for row in cur.fetchall():
-            side = row["side"]
-            if side in ("BUY", "BUY_OPEN"):
-                return {
-                    "position": "long",
-                    "entry_price": row["price"],
-                    "qty": row["qty"],
-                    "ts": row["ts"],
-                    "ts_local": _fmt_ts(row["ts"]),
-                }
-            if side in ("SELL", "SELL_OPEN"):
-                return {
-                    "position": "short",
-                    "entry_price": row["price"],
-                    "qty": row["qty"],
-                    "ts": row["ts"],
-                    "ts_local": _fmt_ts(row["ts"]),
-                }
-            if side in ("BUY_CLOSE", "SELL_CLOSE"):
-                return {"position": "flat"}
-        return {"position": "unknown"}
+def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol: str = "BTCUSDT") -> Dict[str, Any]:
+    """获取当前仓位信息，强制使用币安API实际数据，确保所有交易决策基于真实仓位"""
+    
+    # 强制要求trader实例，确保所有交易都基于API数据
+    if trader is None:
+        raise ValueError("trader实例不能为空，所有交易必须基于币安API数据")
+    
+    try:
+        position_info = trader.get_position_info(symbol)
+        if position_info is not None:
+            # 有实际仓位
+            return {
+                "position": position_info["position_side"],
+                "entry_price": position_info["entry_price"],
+                "qty": abs(position_info["position_amt"]),
+                "pnl": position_info["pnl"],
+                "mark_price": position_info["mark_price"],
+                "leverage": position_info["leverage"],
+                "ts": int(time.time() * 1000),
+                "ts_local": _fmt_ts(int(time.time() * 1000)),
+                "source": "binance_api"
+            }
+        else:
+            # API显示无仓位
+            return {
+                "position": "flat",
+                "ts": int(time.time() * 1000),
+                "ts_local": _fmt_ts(int(time.time() * 1000)),
+                "source": "binance_api"
+            }
+    except Exception as e:
+        # API调用失败，抛出异常而不是回退
+        raise RuntimeError(f"获取币安仓位信息失败，无法继续交易: {e}") from e
 
 
 def _compute_last_closed_pnl(db_path: str) -> Optional[Dict[str, Any]]:
@@ -373,15 +374,17 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
     def api_summary() -> Response:
         c = app.config["SUMMARY_CFG"]
         db_path = c["db_path"]
-        position = _compute_current_position(db_path)
+        trader_obj = app.config.get("TRADER")
+        symbol = c.get("symbol", "BTCUSDT")
+        position = _compute_current_position(db_path, trader_obj, symbol)
         last_closed = _compute_last_closed_pnl(db_path)
         signals = _recent_signals(db_path, limit=20)
         trades = _recent_trades(db_path, limit=20)
         errors = _recent_errors(db_path, limit=10)
         pnl_records = _get_pnl_records(db_path, limit=20)
         daily_stats = _get_daily_stats(db_path, days=7)
-        # enrich position with leverage
-        if position.get("position") in ("long", "short"):
+        # enrich position with leverage (only if not already set by API)
+        if position.get("position") in ("long", "short") and "leverage" not in position:
             position["leverage"] = c["leverage"]
         return jsonify({
             "config": {**c, "web_port": app.config.get("WEB_PORT", 5000)},

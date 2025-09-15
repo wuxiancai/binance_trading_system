@@ -36,6 +36,28 @@ class Trader:
                 return float(b.get("withdrawAvailable", b.get("balance", 0.0)))
         return 0.0
 
+    def get_position_info(self, symbol: str) -> Optional[dict]:
+        """获取指定交易对的仓位信息"""
+        try:
+            positions = self.client.futures_position_information(symbol=symbol, recvWindow=self.recv_window)
+            for pos in positions:
+                if pos.get("symbol") == symbol:
+                    position_amt = float(pos.get("positionAmt", 0))
+                    if abs(position_amt) > 0.0001:  # 有仓位
+                        return {
+                            "symbol": symbol,
+                            "position_amt": position_amt,
+                            "entry_price": float(pos.get("entryPrice", 0)),
+                            "mark_price": float(pos.get("markPrice", 0)),
+                            "pnl": float(pos.get("unRealizedProfit", 0)),
+                            "position_side": "long" if position_amt > 0 else "short",
+                            "leverage": int(pos.get("leverage", 1))
+                        }
+            return None  # 无仓位
+        except Exception as e:
+            logging.warning(f"获取仓位信息失败: {e}")
+            return None
+
     def _round_qty(self, qty: float) -> float:
         # 简单数量精度处理；生产建议根据 exchangeInfo 的 stepSize 动态对齐
         if qty <= 0:

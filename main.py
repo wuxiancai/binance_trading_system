@@ -108,6 +108,21 @@ async def main():
 
         price = k.close
 
+        # 从币安API获取实际仓位，确保交易决策基于真实仓位
+        if cfg.api_key and cfg.api_secret:
+            try:
+                actual_position = trader.get_position_info(cfg.symbol)
+                if actual_position is not None:
+                    # 有仓位，更新本地状态
+                    state.position = actual_position["position_side"]
+                else:
+                    # 无仓位
+                    state.position = "flat"
+            except Exception as e:
+                logging.error(f"获取币安仓位失败，无法继续交易: {e}")
+                # 强制要求API成功，不允许回退
+                return
+
         signal = decide(price, up, dn, state)
         if signal:
             await db.log_signal(int(time.time()*1000), signal, price)
