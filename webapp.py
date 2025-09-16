@@ -762,7 +762,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                      const bollUp = bollData.up ? fmt(bollData.up) : '--';
                      const bollDn = bollData.dn ? fmt(bollData.dn) : '--';
                      const bollMa = bollData.ma ? fmt(bollData.ma) : '--';
-                     const bollTime = bollData.timestamp || '--';
+                     const bollTime = bollData.time_local || '--';
                      const interval = data.config?.interval || '1m';
                      cards.push(`
                        <div class="card">
