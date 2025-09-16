@@ -30,11 +30,29 @@ class Trader:
             logging.warning(f"change leverage failed: {e}")
 
     def get_balance_usdt(self) -> float:
-        acct = self.client.futures_account_balance(recvWindow=self.recv_window)
-        for b in acct:
-            if b.get("asset") == "USDT":
-                return float(b.get("withdrawAvailable", b.get("balance", 0.0)))
-        return 0.0
+        """获取期货账户可用保证金余额"""
+        try:
+            # 使用futures_account获取账户信息，包含可用保证金
+            account_info = self.client.futures_account(recvWindow=self.recv_window)
+            # availableBalance是可用于开仓的保证金余额
+            available_balance = float(account_info.get("availableBalance", 0.0))
+            if available_balance > 0:
+                return available_balance
+            
+            # 如果availableBalance不可用，回退到使用totalWalletBalance
+            total_wallet_balance = float(account_info.get("totalWalletBalance", 0.0))
+            if total_wallet_balance > 0:
+                return total_wallet_balance
+                
+            # 最后回退到原来的方法
+            acct = self.client.futures_account_balance(recvWindow=self.recv_window)
+            for b in acct:
+                if b.get("asset") == "USDT":
+                    return float(b.get("balance", 0.0))
+            return 0.0
+        except Exception as e:
+            logging.error(f"获取USDT余额失败: {e}")
+            return 0.0
 
     def get_account_info(self) -> dict:
         """获取账户信息，包含全仓保证金等信息"""
