@@ -24,7 +24,7 @@ class Config:
     api_secret: str = "523755dec380c497f8bec63929ba16f3918a15bac06a78c6535ef65f0d5aa523"                 # 币安 API Secret
     use_testnet: bool = True              # 是否使用测试网：1/true 为测试网
     symbol: str = "BTCUSDT"              # 交易对（如 BTCUSDT）
-    interval: str = "1m"                # K线周期（如 15m）
+    interval: str = "15m"                # K线周期（如 15m）
     window: int = 20                      # 布林带窗口期（默认 20）
 
     # ---------------------------
