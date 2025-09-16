@@ -36,22 +36,81 @@ class Trader:
                 return float(b.get("withdrawAvailable", b.get("balance", 0.0)))
         return 0.0
 
+    def get_account_info(self) -> dict:
+        """获取账户信息，包含全仓保证金等信息"""
+        try:
+            return self.client.futures_account(recvWindow=self.recv_window)
+        except Exception as e:
+            logging.error(f"获取账户信息失败: {e}")
+            return {}
+
     def get_position_info(self, symbol: str) -> Optional[dict]:
         """获取指定交易对的仓位信息"""
         try:
+            # 获取仓位信息
             positions = self.client.futures_position_information(symbol=symbol, recvWindow=self.recv_window)
+            # 获取账户信息以获取全仓保证金
+            account_info = self.get_account_info()
+            
             for pos in positions:
                 if pos.get("symbol") == symbol:
                     position_amt = float(pos.get("positionAmt", 0))
                     if abs(position_amt) > 0.0001:  # 有仓位
+                        entry_price = float(pos.get("entryPrice", 0))
+                        mark_price = float(pos.get("markPrice", 0))
+                        leverage = int(pos.get("leverage", 1))
+                        
+                        # 直接从API获取字段，不再计算
+                        # 保证金 - 从账户信息获取全仓保证金
+                        # 全仓保证金 = totalCrossWalletBalance (总全仓钱包余额)
+                        margin = float(account_info.get("totalCrossWalletBalance", 0))
+                        # 如果没有全仓保证金信息，则使用仓位的逐仓保证金
+                        if margin == 0:
+                            margin = float(pos.get("isolatedMargin", 0))
+                        
+                        # 保证金比例 - 从账户信息获取保证金比例
+                        # 保证金比例 = totalMaintMargin / totalCrossWalletBalance * 100
+                        total_maint_margin = float(account_info.get("totalMaintMargin", 0))
+                        total_cross_balance = float(account_info.get("totalCrossWalletBalance", 1))  # 避免除零
+                        margin_ratio = (total_maint_margin / total_cross_balance * 100) if total_cross_balance > 0 else 0
+                        
+                        # 强平价格 - 从API直接获取
+                        liquidation_price = float(pos.get("liquidationPrice", 0))
+                        
+                        # 盈亏 - 从API获取未实现盈亏
+                        pnl = float(pos.get("unRealizedProfit", 0))
+                        
+                        # 盈亏回报率 - 从API获取回报率 (percentage)
+                        pnl_percentage = float(pos.get("percentage", 0))
+                        
+                        # 数量 - 从API获取仓位数量 (绝对值)
+                        quantity = abs(position_amt)
+                        
+                        # 合约显示 - 显示合约类型和杠杆倍数
+                        # 从symbol提取基础货币对，添加永续标识和杠杆倍数
+                        base_symbol = symbol.replace("USDT", "")  # 提取基础货币对，如BTC
+                        margin_type = pos.get("marginType", "cross")  # 获取保证金类型
+                        margin_type_cn = "全仓" if margin_type.lower() == "cross" else "逐仓"
+                        contract = f"{base_symbol}USDT\n永续 {leverage}x"
+                        
+                        # 仓位价值
+                        position_value = abs(position_amt) * mark_price
+                        
                         return {
                             "symbol": symbol,
+                            "contract": contract,  # 合约名称
                             "position_amt": position_amt,
-                            "entry_price": float(pos.get("entryPrice", 0)),
-                            "mark_price": float(pos.get("markPrice", 0)),
-                            "pnl": float(pos.get("unRealizedProfit", 0)),
+                            "quantity": quantity,  # 数量 (绝对值)
+                            "entry_price": entry_price,
+                            "mark_price": mark_price,
+                            "pnl": pnl,  # 盈亏 (USDT)
+                            "pnl_percentage": pnl_percentage,  # 盈亏回报率 (%)
                             "position_side": "long" if position_amt > 0 else "short",
-                            "leverage": int(pos.get("leverage", 1))
+                            "leverage": leverage,
+                            "margin": margin,  # 保证金 (USDT) - 从API获取已用保证金
+                            "margin_ratio": margin_ratio,  # 保证金比例 (%) - 从API获取并正确转换
+                            "liquidation_price": liquidation_price,  # 强平价格 - 从API获取
+                            "position_value": position_value  # 仓位价值 (USDT)
                         }
             return None  # 无仓位
         except Exception as e:

@@ -96,11 +96,16 @@ def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol
             # 有实际仓位
             return {
                 "position": position_info["position_side"],
+                "contract": position_info["contract"],  # 合约名称
+                "quantity": position_info["quantity"],  # 数量
                 "entry_price": position_info["entry_price"],
-                "qty": abs(position_info["position_amt"]),
-                "pnl": position_info["pnl"],
+                "margin": position_info["margin"],  # 保证金
+                "pnl": position_info["pnl"],  # 盈亏
+                "pnl_percentage": position_info["pnl_percentage"],  # 盈亏回报率
                 "mark_price": position_info["mark_price"],
                 "leverage": position_info["leverage"],
+                "margin_ratio": position_info["margin_ratio"],  # 保证金比例
+                "liquidation_price": position_info["liquidation_price"],  # 强平价格
                 "ts": int(time.time() * 1000),
                 "ts_local": _fmt_ts(int(time.time() * 1000)),
                 "source": "binance_api"
@@ -587,16 +592,20 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                      // Position (render before trades)
                      const p = data.position || {};
                      if (p.position === 'long' || p.position === 'short') {
-                      const amount = (p.entry_price != null && p.qty != null) ? (Number(p.entry_price) * Number(p.qty)) : null;
                       cards.push(`
                         <div class="card">
                           <h3>当前仓位</h3>
                           <table>
+                            <tr><th>合约</th><td>${p.contract || dash}</td></tr>
+                            <tr><th>数量</th><td>${fmt(p.quantity, 6)} BTC</td></tr>
                             <tr><th>方向</th><td><span class="${dirClass(p.position)}">${fmt(p.position, 0)}</span></td></tr>
-                            <tr><th>买入价格</th><td>${fmt(p.entry_price)}</td></tr>
-                            <tr><th>数量</th><td>${fmt(p.qty, 4)}</td></tr>
-                            <tr><th>金额</th><td>${fmt(amount)}</td></tr>
-                            <tr><th>杠杆</th><td>${fmt(p.leverage, 0)}</td></tr>
+                            <tr><th>入场价格</th><td>${fmt(p.entry_price)}</td></tr>
+                            <tr><th>标记价格</th><td>${fmt(p.mark_price)}</td></tr>
+                            <tr><th>保证金</th><td>${fmt(p.margin, 2)} USDT</td></tr>
+                            <tr><th>盈亏(回报率)</th><td><span class="${p.pnl >= 0 ? 'pnl-profit' : 'pnl-loss'}">${fmt(p.pnl, 2)} USDT (${fmt(p.pnl_percentage, 2)}%)</span></td></tr>
+                            <tr><th>杠杆</th><td>${fmt(p.leverage, 0)}x</td></tr>
+                            <tr><th>保证金比例</th><td>${fmt(p.margin_ratio, 2)}%</td></tr>
+                            <tr><th>强平价格</th><td>${fmt(p.liquidation_price, 2)}</td></tr>
                             <tr><th>建仓时间</th><td>${p.ts_local ?? dash}</td></tr>
                           </table>
                         </div>`);
@@ -605,11 +614,16 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                         <div class="card">
                           <h3>当前仓位</h3>
                           <table>
-                            <tr><th>方向</th><td>${dash}</td></tr>
-                            <tr><th>买入价格</th><td>${dash}</td></tr>
+                            <tr><th>合约</th><td>${dash}</td></tr>
                             <tr><th>数量</th><td>${dash}</td></tr>
-                            <tr><th>金额</th><td>${dash}</td></tr>
+                            <tr><th>方向</th><td>${dash}</td></tr>
+                            <tr><th>入场价格</th><td>${dash}</td></tr>
+                            <tr><th>标记价格</th><td>${dash}</td></tr>
+                            <tr><th>保证金</th><td>${dash}</td></tr>
+                            <tr><th>盈亏</th><td>${dash}</td></tr>
                             <tr><th>杠杆</th><td>${dash}</td></tr>
+                            <tr><th>保证金比例</th><td>${dash}</td></tr>
+                            <tr><th>强平价格</th><td>${dash}</td></tr>
                             <tr><th>建仓时间</th><td>${dash}</td></tr>
                           </table>
                         </div>`);
