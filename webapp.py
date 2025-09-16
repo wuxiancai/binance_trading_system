@@ -60,15 +60,7 @@ def _recent_signals(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
         return rows
 
 
-def _recent_errors(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
-    with _connect(db_path) as conn:
-        cur = conn.execute(
-            "SELECT ts, where_, error FROM errors ORDER BY ts DESC LIMIT ?", (limit,)
-        )
-        rows = [dict(r) for r in cur.fetchall()]
-        for r in rows:
-            r["ts_local"] = _fmt_ts(r["ts"])
-        return rows
+
 
 
 def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
@@ -78,8 +70,79 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
             (limit,),
         )
         rows = [dict(r) for r in cur.fetchall()]
+        
+        # 为每笔交易添加时间格式化、操作类型和方向
         for r in rows:
             r["ts_local"] = _fmt_ts(r["ts"])
+            r["pnl"] = None  # 默认无盈亏
+            
+            # 根据side字段确定操作类型和方向
+            side = r["side"]
+            if side in ["BUY", "BUY_OPEN"]:
+                r["action_type"] = "买"  # 开仓
+                r["direction"] = "LONG"
+            elif side in ["SELL", "SELL_OPEN"]:
+                r["action_type"] = "买"  # 开仓
+                r["direction"] = "SHORT"
+            elif side in ["BUY_CLOSE", "BUY_STOP_LOSS"]:
+                r["action_type"] = "卖"  # 平仓/止损
+                r["direction"] = "SHORT"  # 平的是空仓
+            elif side in ["SELL_CLOSE", "SELL_STOP_LOSS"]:
+                r["action_type"] = "卖"  # 平仓/止损
+                r["direction"] = "LONG"   # 平的是多仓
+            else:
+                r["action_type"] = "未知"
+                r["direction"] = "未知"
+        
+        # 获取所有交易记录用于配对计算盈亏
+        cur_all = conn.execute(
+            "SELECT ts, side, qty, price FROM trades WHERE side IN ('BUY','SELL','BUY_CLOSE','SELL_CLOSE','BUY_OPEN','SELL_OPEN') ORDER BY ts ASC"
+        )
+        all_trades = cur_all.fetchall()
+        
+        # 创建交易配对的盈亏映射
+        pnl_map = {}  # {timestamp: pnl}
+        
+        # 配对交易计算盈亏
+        i = 0
+        while i < len(all_trades) - 1:
+            trade1 = all_trades[i]
+            trade2 = all_trades[i + 1]
+            
+            side1 = trade1["side"]
+            side2 = trade2["side"]
+            price1 = float(trade1["price"]) if trade1["price"] is not None else None
+            price2 = float(trade2["price"]) if trade2["price"] is not None else None
+            qty1 = float(trade1["qty"]) if trade1["qty"] is not None else 0.0
+            qty2 = float(trade2["qty"]) if trade2["qty"] is not None else 0.0
+            
+            if price1 is None or price2 is None:
+                i += 1
+                continue
+            
+            # 检查是否为有效的交易对
+            pnl = 0.0
+            
+            # BUY -> SELL (多仓盈亏)
+            if side1 in ("BUY", "BUY_OPEN") and side2 in ("SELL", "SELL_CLOSE"):
+                pnl = (price2 - price1) * min(qty1, qty2)  # 平仓金额 - 开仓金额
+                pnl_map[trade1["ts"]] = -pnl  # 开仓交易显示负值（投入）
+                pnl_map[trade2["ts"]] = pnl   # 平仓交易显示盈亏
+                i += 2
+            # SELL -> BUY (空仓盈亏)  
+            elif side1 in ("SELL", "SELL_OPEN") and side2 in ("BUY", "BUY_CLOSE"):
+                pnl = (price1 - price2) * min(qty1, qty2)  # 平仓金额 - 开仓金额
+                pnl_map[trade1["ts"]] = -pnl  # 开仓交易显示负值（投入）
+                pnl_map[trade2["ts"]] = pnl   # 平仓交易显示盈亏
+                i += 2
+            else:
+                i += 1
+        
+        # 将盈亏信息添加到交易记录中
+        for r in rows:
+            if r["ts"] in pnl_map:
+                r["pnl"] = pnl_map[r["ts"]]
+        
         return rows
 
 
@@ -266,9 +329,19 @@ def _get_pnl_records(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
         return records[:limit]
 
 
-def _get_daily_stats(db_path: str, days: int = 7) -> List[Dict[str, Any]]:
+def _get_daily_stats(db_path: str, days: int = 7, trader: Optional[Any] = None) -> List[Dict[str, Any]]:
     """获取每日交易统计"""
     stats = []
+    
+    # 获取保证金余额用于计算利润率
+    margin_balance = 1000.0  # 默认值
+    if trader:
+        try:
+            position_info = trader.get_position_info()
+            margin_balance = position_info.get("margin_balance", 1000.0)
+        except:
+            margin_balance = 1000.0
+    
     with _connect(db_path) as conn:
         # 获取所有交易记录，按时间排序
         cur = conn.execute(
@@ -323,10 +396,8 @@ def _get_daily_stats(db_path: str, days: int = 7) -> List[Dict[str, Any]]:
         
         # 转换为列表并计算利润率
         for date_str, data in sorted(daily_data.items(), reverse=True)[:days]:
-            profit_rate = 0.0
-            if data['trades'] > 0:
-                # 简单的利润率计算（假设每笔交易投入相同）
-                profit_rate = (data['total_pnl'] / data['trades']) * 100 if data['trades'] > 0 else 0.0
+            # 利润率 = 利润总和 / 保证金余额 * 100
+            profit_rate = (data['total_pnl'] / margin_balance) * 100 if margin_balance > 0 else 0.0
             
             stats.append({
                 'date': date_str,
@@ -386,9 +457,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         last_closed = _compute_last_closed_pnl(db_path)
         signals = _recent_signals(db_path, limit=20)
         trades = _recent_trades(db_path, limit=20)
-        errors = _recent_errors(db_path, limit=10)
         pnl_records = _get_pnl_records(db_path, limit=20)
-        daily_stats = _get_daily_stats(db_path, days=7)
+        daily_stats = _get_daily_stats(db_path, days=7, trader=trader_obj)
         # enrich position with leverage (only if not already set by API)
         if position.get("position") in ("long", "short") and "leverage" not in position:
             position["leverage"] = c["leverage"]
@@ -398,7 +468,6 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
             "last_closed": last_closed,
             "signals": signals,
             "trades": trades,
-            "errors": errors,
             "pnl_records": pnl_records,
             "daily_stats": daily_stats,
         })
@@ -519,6 +588,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                  .err { color: var(--danger); font-weight: 600; }
                  .dir-long { color: var(--success); font-weight: 600; font-size: 12px; }
                  .dir-short { color: var(--danger); font-weight: 600; font-size: 12px; }
+                 .dir-buy { color: var(--success); font-weight: 600; font-size: 12px; }
+                 .dir-sell { color: var(--danger); font-weight: 600; font-size: 12px; }
                  .bool-true { color: var(--danger); font-weight: 500; background: rgba(239, 68, 68, 0.1); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
                  .pnl-profit { color: var(--success); font-weight: 600; }
                  .pnl-loss { color: var(--danger); font-weight: 600; }
@@ -660,27 +731,14 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                       return '';
                     };
                     
-                    // Calculate PnL for each trade
-                    const tradesWithPnl = (data.trades || []).map((t, index) => {
-                      let pnl = null;
-                      // Find matching PnL record for this trade
-                      const pnlRecord = (data.pnl_records || []).find(p => 
-                        Math.abs(new Date(p.ts_local).getTime() - new Date(t.ts_local).getTime()) < 60000 && // within 1 minute
-                        ((t.side.includes('CLOSE') && p.side === (t.side.includes('BUY') ? 'short' : 'long')))
-                      );
-                      if (pnlRecord) {
-                        pnl = pnlRecord.pnl;
-                      }
-                      return {...t, pnl};
-                    });
-                    
-                    const tdRows = tradesWithPnl.map(t => `<tr><td>${t.ts_local}</td><td><span class="${dirClass(t.side)}">${t.side}</span></td><td>${t.qty}</td><td>${t.price ?? ''}</td><td><span class="${statusClass(t.status)}">${t.status ?? ''}</span></td><td>${t.pnl != null ? `<span class="${pnlClass(t.pnl)}">${fmt(t.pnl)}</span>` : '--'}</td><td>${t.order_id ?? ''}</td></tr>`).join('');
+                    // 交易记录，显示时间、买/卖、方向、数量、价格
+                    const tdRows = (data.trades || []).map(t => `<tr><td>${t.ts_local}</td><td><span class="${t.action_type === '买' ? 'dir-buy' : 'dir-sell'}">${t.action_type}</span></td><td><span class="${dirClass(t.direction)}">${t.direction}</span></td><td>${t.qty}</td><td>${t.price ?? ''}</td></tr>`).join('');
                      cards.push(`
                        <div class="card">
                          <h3>最近交易</h3>
                         <div class="table-wrap">
                           <table>
-                            <tr><th style="width:18%">时间</th><th style="width:8%">方向</th><th style="width:10%">数量</th><th style="width:12%">价格</th><th style="width:8%">状态</th><th style="width:12%">盈亏</th><th style="width:32%">订单ID</th></tr>
+                            <tr><th style="width:20%">时间</th><th style="width:15%">买/卖</th><th style="width:15%">方向</th><th style="width:25%">数量</th><th style="width:25%">价格</th></tr>
                             ${tdRows}
                           </table>
                         </div>
@@ -707,18 +765,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
  
 
  
-                     // Recent errors
-                    const errRows = (data.errors || []).map(e => `<tr><td>${e.ts_local}</td><td>${e.error}</td></tr>`).join('');
-                     cards.push(`
-                       <div class="card">
-                         <h3>最近错误</h3>
-                        <div class="table-wrap">
-                          <table>
-                            <tr><th style="width:35%">时间</th><th style="width:65%">错误</th></tr>
-                            ${errRows}
-                          </table>
-                        </div>
-                       </div>`);
+
  
                      document.getElementById('cards').innerHTML = cards.join('');
                  }
