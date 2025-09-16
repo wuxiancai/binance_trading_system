@@ -61,12 +61,16 @@ class Trader:
                         leverage = int(pos.get("leverage", 1))
                         
                         # 直接从API获取字段，不再计算
-                        # 保证金 - 从账户信息获取全仓保证金
+                        # 保证金余额 - 从账户信息获取全仓保证金
                         # 全仓保证金 = totalCrossWalletBalance (总全仓钱包余额)
-                        margin = float(account_info.get("totalCrossWalletBalance", 0))
+                        margin_balance = float(account_info.get("totalCrossWalletBalance", 0))
                         # 如果没有全仓保证金信息，则使用仓位的逐仓保证金
-                        if margin == 0:
-                            margin = float(pos.get("isolatedMargin", 0))
+                        if margin_balance == 0:
+                            margin_balance = float(pos.get("isolatedMargin", 0))
+                        
+                        # 开仓金额 - 从仓位信息获取初始保证金
+                        # initialMargin 是开仓时使用的保证金金额
+                        position_initial_margin = float(pos.get("initialMargin", 0))
                         
                         # 保证金比例 - 从账户信息获取保证金比例
                         # 保证金比例 = totalMaintMargin / totalCrossWalletBalance * 100
@@ -107,7 +111,8 @@ class Trader:
                             "pnl_percentage": pnl_percentage,  # 盈亏回报率 (%)
                             "position_side": "long" if position_amt > 0 else "short",
                             "leverage": leverage,
-                            "margin": margin,  # 保证金 (USDT) - 从API获取已用保证金
+                            "margin_balance": margin_balance,  # 保证金余额 (USDT) - 从API获取全仓保证金
+                            "position_initial_margin": position_initial_margin,  # 开仓金额 (USDT) - 从API获取初始保证金
                             "margin_ratio": margin_ratio,  # 保证金比例 (%) - 从API获取并正确转换
                             "liquidation_price": liquidation_price,  # 强平价格 - 从API获取
                             "position_value": position_value  # 仓位价值 (USDT)

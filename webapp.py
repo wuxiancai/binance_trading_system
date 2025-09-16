@@ -99,7 +99,8 @@ def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol
                 "contract": position_info["contract"],  # 合约名称
                 "quantity": position_info["quantity"],  # 数量
                 "entry_price": position_info["entry_price"],
-                "margin": position_info["margin"],  # 保证金
+                "margin_balance": position_info["margin_balance"],  # 保证金余额
+                "position_initial_margin": position_info["position_initial_margin"],  # 开仓金额
                 "pnl": position_info["pnl"],  # 盈亏
                 "pnl_percentage": position_info["pnl_percentage"],  # 盈亏回报率
                 "mark_price": position_info["mark_price"],
@@ -601,7 +602,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                             <tr><th>方向</th><td><span class="${dirClass(p.position)}">${fmt(p.position, 0)}</span></td></tr>
                             <tr><th>入场价格</th><td>${fmt(p.entry_price)}</td></tr>
                             <tr><th>标记价格</th><td>${fmt(p.mark_price)}</td></tr>
-                            <tr><th>保证金</th><td>${fmt(p.margin, 2)} USDT</td></tr>
+                            <tr><th>保证金余额</th><td>${fmt(p.margin_balance, 2)} USDT</td></tr>
+                            <tr><th>开仓金额</th><td>${fmt(p.position_initial_margin, 2)} USDT</td></tr>
                             <tr><th>盈亏(回报率)</th><td><span class="${p.pnl >= 0 ? 'pnl-profit' : 'pnl-loss'}">${fmt(p.pnl, 2)} USDT (${fmt(p.pnl_percentage, 2)}%)</span></td></tr>
                             <tr><th>杠杆</th><td>${fmt(p.leverage, 0)}x</td></tr>
                             <tr><th>保证金比例</th><td>${fmt(p.margin_ratio, 2)}%</td></tr>
@@ -619,7 +621,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                             <tr><th>方向</th><td>${dash}</td></tr>
                             <tr><th>入场价格</th><td>${dash}</td></tr>
                             <tr><th>标记价格</th><td>${dash}</td></tr>
-                            <tr><th>保证金</th><td>${dash}</td></tr>
+                            <tr><th>保证金余额</th><td>${dash}</td></tr>
+                            <tr><th>开仓金额</th><td>${dash}</td></tr>
                             <tr><th>盈亏</th><td>${dash}</td></tr>
                             <tr><th>杠杆</th><td>${dash}</td></tr>
                             <tr><th>保证金比例</th><td>${dash}</td></tr>
