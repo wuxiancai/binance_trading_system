@@ -79,22 +79,22 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
             # 根据side字段确定操作类型和方向
             side = r["side"]
             if side in ["BUY", "BUY_OPEN"]:
-                r["action_type"] = "买"  # 开仓
+                r["action_type"] = "买"  # 开仓多头
                 r["direction"] = "LONG"
             elif side in ["SELL", "SELL_OPEN"]:
-                r["action_type"] = "买"  # 开仓
+                r["action_type"] = "买"  # 开仓空头
                 r["direction"] = "SHORT"
             elif side == "BUY_CLOSE":
-                r["action_type"] = "平仓"  # 平仓
+                r["action_type"] = "平"  # 平仓
                 r["direction"] = "SHORT"  # 平的是空仓
             elif side == "BUY_STOP_LOSS":
-                r["action_type"] = "止损"  # 止损
+                r["action_type"] = "平"  # 止损平仓
                 r["direction"] = "SHORT"  # 平的是空仓
             elif side == "SELL_CLOSE":
-                r["action_type"] = "平仓"  # 平仓
+                r["action_type"] = "平"  # 平仓
                 r["direction"] = "LONG"   # 平的是多仓
             elif side == "SELL_STOP_LOSS":
-                r["action_type"] = "止损"  # 止损
+                r["action_type"] = "平"  # 止损平仓
                 r["direction"] = "LONG"   # 平的是多仓
             else:
                 r["action_type"] = "未知"
@@ -786,14 +786,14 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                       return '';
                     };
                     
-                    // 交易记录，显示时间、买/卖、方向、数量、价格
+                    // 交易记录，显示时间、买/平、方向、数量、价格
                     const tdRows = (data.trades || []).map(t => `<tr><td>${t.ts_local}</td><td><span class="${t.action_type === '买' ? 'dir-buy' : 'dir-sell'}">${t.action_type}</span></td><td><span class="${dirClass(t.direction)}">${t.direction}</span></td><td>${t.qty}</td><td>${t.price ?? ''}</td></tr>`).join('');
                      cards.push(`
                        <div class="card">
                          <h3>最近交易</h3>
                         <div class="table-wrap">
                           <table>
-                            <tr><th style="width:20%">时间</th><th style="width:15%">买/卖</th><th style="width:15%">方向</th><th style="width:25%">数量</th><th style="width:25%">价格</th></tr>
+                            <tr><th style="width:20%">时间</th><th style="width:15%">买/平</th><th style="width:15%">方向</th><th style="width:25%">数量</th><th style="width:25%">价格</th></tr>
                             ${tdRows}
                           </table>
                         </div>
