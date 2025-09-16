@@ -166,7 +166,27 @@ class Trader:
         )
         return order
 
+    def get_position_quantity(self, symbol: str) -> tuple[float, str]:
+        """获取指定交易对的实际仓位数量和方向
+        返回: (数量, 方向) 其中方向为 'long', 'short', 或 'flat'
+        """
+        try:
+            positions = self.client.futures_position_information(symbol=symbol, recvWindow=self.recv_window)
+            for pos in positions:
+                if pos.get("symbol") == symbol:
+                    position_amt = float(pos.get("positionAmt", 0))
+                    if abs(position_amt) > 0.0001:  # 有仓位
+                        if position_amt > 0:
+                            return abs(position_amt), "long"
+                        else:
+                            return abs(position_amt), "short"
+            return 0.0, "flat"
+        except Exception as e:
+            logging.error(f"获取仓位数量失败: {e}")
+            return 0.0, "flat"
+
     def close_position(self, symbol: str, side: str, qty: float):
+        """传统的平仓方法，使用指定数量"""
         order = self.client.futures_create_order(
             symbol=symbol,
             side=side,
@@ -176,6 +196,76 @@ class Trader:
             recvWindow=self.recv_window,
         )
         return order
+
+    def close_all_position(self, symbol: str):
+        """市价全部平仓 - 获取实际仓位数量并完全平仓"""
+        try:
+            qty, direction = self.get_position_quantity(symbol)
+            if direction == "flat" or qty == 0:
+                logging.info(f"{symbol} 没有持仓，无需平仓")
+                return None
+            
+            # 确定平仓方向
+            if direction == "long":
+                side = SIDE_SELL  # 平多仓用卖单
+            else:  # direction == "short"
+                side = SIDE_BUY   # 平空仓用买单
+            
+            # 执行市价平仓
+            order = self.client.futures_create_order(
+                symbol=symbol,
+                side=side,
+                type=ORDER_TYPE_MARKET,
+                quantity=self._round_qty(qty),
+                reduceOnly=True,
+                recvWindow=self.recv_window,
+            )
+            logging.info(f"市价全部平仓成功: {symbol} {direction} {qty}")
+            return order
+            
+        except Exception as e:
+            logging.error(f"市价全部平仓失败: {e}")
+            return None
+
+    def close_all_position_with_stop_market(self, symbol: str):
+        """使用STOP_MARKET + closePosition=true 立即全部平仓"""
+        try:
+            qty, direction = self.get_position_quantity(symbol)
+            if direction == "flat" or qty == 0:
+                logging.info(f"{symbol} 没有持仓，无需平仓")
+                return None
+            
+            # 获取当前价格作为止损价格（立即触发）
+            ticker = self.client.futures_symbol_ticker(symbol=symbol)
+            current_price = float(ticker['price'])
+            
+            # 确定平仓方向和止损价格
+            if direction == "long":
+                side = SIDE_SELL  # 平多仓用卖单
+                # 设置一个略低于当前价格的止损价，确保立即触发
+                stop_price = round(current_price * 0.999, self.price_round)
+            else:  # direction == "short"
+                side = SIDE_BUY   # 平空仓用买单
+                # 设置一个略高于当前价格的止损价，确保立即触发
+                stop_price = round(current_price * 1.001, self.price_round)
+            
+            # 使用STOP_MARKET + closePosition=true
+            order = self.client.futures_create_order(
+                symbol=symbol,
+                side=side,
+                type="STOP_MARKET",
+                stopPrice=stop_price,
+                closePosition=True,  # 这会关闭所有仓位
+                workingType=self.stop_loss_working_type,
+                recvWindow=self.recv_window,
+            )
+            logging.info(f"STOP_MARKET全部平仓成功: {symbol} {direction}")
+            return order
+            
+        except Exception as e:
+            logging.error(f"STOP_MARKET全部平仓失败: {e}")
+            # 如果失败，回退到普通市价平仓
+            return self.close_all_position(symbol)
 
     def place_stop_loss(self, symbol: str, position: str, entry_price: float, stop_loss_pct: float):
         """Place a reduce-only STOP_MARKET order at +/- stop_loss_pct from entry.
@@ -196,8 +286,7 @@ class Trader:
                 side=side,
                 type="STOP_MARKET",
                 stopPrice=stop_price,
-                closePosition=True,
-                reduceOnly=True,
+                closePosition=True,  # 使用closePosition=true确保全部平仓
                 workingType=self.stop_loss_working_type,
                 recvWindow=self.recv_window,
             )

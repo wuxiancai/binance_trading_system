@@ -84,11 +84,17 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
             elif side in ["SELL", "SELL_OPEN"]:
                 r["action_type"] = "买"  # 开仓
                 r["direction"] = "SHORT"
-            elif side in ["BUY_CLOSE", "BUY_STOP_LOSS"]:
-                r["action_type"] = "卖"  # 平仓/止损
+            elif side == "BUY_CLOSE":
+                r["action_type"] = "平仓"  # 平仓
                 r["direction"] = "SHORT"  # 平的是空仓
-            elif side in ["SELL_CLOSE", "SELL_STOP_LOSS"]:
-                r["action_type"] = "卖"  # 平仓/止损
+            elif side == "BUY_STOP_LOSS":
+                r["action_type"] = "止损"  # 止损
+                r["direction"] = "SHORT"  # 平的是空仓
+            elif side == "SELL_CLOSE":
+                r["action_type"] = "平仓"  # 平仓
+                r["direction"] = "LONG"   # 平的是多仓
+            elif side == "SELL_STOP_LOSS":
+                r["action_type"] = "止损"  # 止损
                 r["direction"] = "LONG"   # 平的是多仓
             else:
                 r["action_type"] = "未知"

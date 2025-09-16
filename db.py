@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS errors (
     where_ TEXT NOT NULL,
     error TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS strategy_state (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts INTEGER NOT NULL,
+    position TEXT NOT NULL,
+    pending TEXT,
+    entry_price REAL,
+    breakout_level REAL
+);
 """
 
 
@@ -114,3 +123,29 @@ class DB:
                 open_sides
             )
             await db.commit()
+
+    async def save_strategy_state(self, ts: int, position: str, pending: str = None, entry_price: float = None, breakout_level: float = None):
+        """保存策略状态"""
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute(
+                "INSERT INTO strategy_state(ts, position, pending, entry_price, breakout_level) VALUES (?,?,?,?,?)",
+                (ts, position, pending, entry_price, breakout_level),
+            )
+            await db.commit()
+
+    async def load_latest_strategy_state(self):
+        """加载最新的策略状态"""
+        async with aiosqlite.connect(self.path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT position, pending, entry_price, breakout_level FROM strategy_state ORDER BY ts DESC LIMIT 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    return {
+                        'position': row['position'],
+                        'pending': row['pending'],
+                        'entry_price': row['entry_price'],
+                        'breakout_level': row['breakout_level']
+                    }
+                return None

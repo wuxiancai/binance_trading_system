@@ -93,6 +93,10 @@ async def main():
                   backoff_max=cfg.ws_backoff_max)
 
     state = StrategyState()
+    # 从数据库加载最新的策略状态
+    latest_state = await db.load_latest_strategy_state()
+    state.load_from_dict(latest_state)
+    logging.info(f"Loaded strategy state: position={state.position}, pending={state.pending}, entry_price={state.entry_price}")
 
     async def on_kline(k: KlineEvent):
         # persist kline
@@ -150,47 +154,60 @@ async def main():
                             trader.place_stop_loss(cfg.symbol, position="long", entry_price=price, stop_loss_pct=cfg.stop_loss_pct)
                 elif signal == "close_short_open_long":
                     # 平空仓+开多仓
-                    qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
-                    if qty > 0:
-                        close = trader.close_position(cfg.symbol, side="BUY", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "BUY_CLOSE", qty, price, str(close.get("orderId")), close.get("status"))
+                    # Close all short position using market close all
+                    close = trader.close_all_position(cfg.symbol)
+                    if close:
+                        await db.log_trade(int(time.time()*1000), "BUY_CLOSE", 0, price, str(close.get("orderId")), close.get("status"))
                         await db.update_trade_status_on_close("BUY_CLOSE")
-                        open_ = trader.place_market(cfg.symbol, side="BUY", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "BUY_OPEN", qty, price, str(open_.get("orderId")), open_.get("status"))
-                        # state已在strategy.py中更新
-                        if cfg.stop_loss_enabled:
-                            trader.place_stop_loss(cfg.symbol, position="long", entry_price=price, stop_loss_pct=cfg.stop_loss_pct)
+                        qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
+                        if qty > 0:
+                            open_ = trader.place_market(cfg.symbol, side="BUY", qty=qty)
+                            await db.log_trade(int(time.time()*1000), "BUY_OPEN", qty, price, str(open_.get("orderId")), open_.get("status"))
+                            # state已在strategy.py中更新
+                            if cfg.stop_loss_enabled:
+                                trader.place_stop_loss(cfg.symbol, position="long", entry_price=price, stop_loss_pct=cfg.stop_loss_pct)
                 elif signal == "close_long_open_short":
                     # 平多仓+开空仓
-                    qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
-                    if qty > 0:
-                        close = trader.close_position(cfg.symbol, side="SELL", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "SELL_CLOSE", qty, price, str(close.get("orderId")), close.get("status"))
+                    # Close all long position using market close all
+                    close = trader.close_all_position(cfg.symbol)
+                    if close:
+                        await db.log_trade(int(time.time()*1000), "SELL_CLOSE", 0, price, str(close.get("orderId")), close.get("status"))
                         await db.update_trade_status_on_close("SELL_CLOSE")
-                        open_ = trader.place_market(cfg.symbol, side="SELL", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "SELL_OPEN", qty, price, str(open_.get("orderId")), open_.get("status"))
-                        # state已在strategy.py中更新
-                        if cfg.stop_loss_enabled:
-                            trader.place_stop_loss(cfg.symbol, position="short", entry_price=price, stop_loss_pct=cfg.stop_loss_pct)
+                        qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
+                        if qty > 0:
+                            open_ = trader.place_market(cfg.symbol, side="SELL", qty=qty)
+                            await db.log_trade(int(time.time()*1000), "SELL_OPEN", qty, price, str(open_.get("orderId")), open_.get("status"))
+                            # state已在strategy.py中更新
+                            if cfg.stop_loss_enabled:
+                                trader.place_stop_loss(cfg.symbol, position="short", entry_price=price, stop_loss_pct=cfg.stop_loss_pct)
                 elif signal == "stop_loss_short":
                     # 空仓止损
-                    qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
-                    if qty > 0:
-                        order = trader.close_position(cfg.symbol, side="BUY", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "BUY_STOP_LOSS", qty, price, str(order.get("orderId")), order.get("status"))
+                    # Close all short position using market close all
+                    order = trader.close_all_position(cfg.symbol)
+                    if order:
+                        await db.log_trade(int(time.time()*1000), "BUY_STOP_LOSS", 0, price, str(order.get("orderId")), order.get("status"))
                         await db.update_trade_status_on_close("BUY_STOP_LOSS")
                         # state已在strategy.py中更新为flat
                 elif signal == "stop_loss_long":
                     # 多仓止损
-                    qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)
-                    if qty > 0:
-                        order = trader.close_position(cfg.symbol, side="SELL", qty=qty)
-                        await db.log_trade(int(time.time()*1000), "SELL_STOP_LOSS", qty, price, str(order.get("orderId")), order.get("status"))
+                    # Close all long position using market close all
+                    order = trader.close_all_position(cfg.symbol)
+                    if order:
+                        await db.log_trade(int(time.time()*1000), "SELL_STOP_LOSS", 0, price, str(order.get("orderId")), order.get("status"))
                         await db.update_trade_status_on_close("SELL_STOP_LOSS")
                         # state已在strategy.py中更新为flat
             except Exception as e:
                 logging.error(f"order failed: {e}")
                 await db.log_error(int(time.time()*1000), "order", str(e))
+            
+            # 保存策略状态
+            await db.save_strategy_state(
+                int(time.time()*1000), 
+                state.position, 
+                state.pending, 
+                state.entry_price, 
+                state.breakout_level
+            )
 
     await ws.connect_and_listen(on_kline)
 

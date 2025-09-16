@@ -7,6 +7,23 @@ class StrategyState:
     entry_price: float | None = None  # 开仓价格，用于止损计算
     breakout_level: float | None = None  # 突破的关键价位（上轨或下轨）
 
+    def load_from_dict(self, state_dict):
+        """从字典加载状态"""
+        if state_dict:
+            self.position = state_dict.get('position', 'flat')
+            self.pending = state_dict.get('pending')
+            self.entry_price = state_dict.get('entry_price')
+            self.breakout_level = state_dict.get('breakout_level')
+
+    def to_dict(self):
+        """转换为字典用于保存"""
+        return {
+            'position': self.position,
+            'pending': self.pending,
+            'entry_price': self.entry_price,
+            'breakout_level': self.breakout_level
+        }
+
 
 def decide(price: float, up: float, dn: float, state: StrategyState) -> str | None:
     """
