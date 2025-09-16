@@ -68,9 +68,9 @@ class Trader:
                         if margin_balance == 0:
                             margin_balance = float(pos.get("isolatedMargin", 0))
                         
-                        # 开仓金额 - 从仓位信息获取初始保证金
-                        # initialMargin 是开仓时使用的保证金金额
-                        position_initial_margin = float(pos.get("initialMargin", 0))
+                        # 开仓金额 - 通过计算得出：开仓金额 = (数量 × 开仓价格) / 杠杆
+                        # position_amt: 仓位数量, entry_price: 开仓价格, leverage: 杠杆倍数
+                        position_initial_margin = (abs(position_amt) * entry_price) / leverage
                         
                         # 保证金比例 - 从账户信息获取保证金比例
                         # 保证金比例 = totalMaintMargin / totalCrossWalletBalance * 100
