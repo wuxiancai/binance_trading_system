@@ -11,6 +11,9 @@ from typing import Optional, Dict, Any, List, Tuple
 
 from flask import Flask, jsonify, Response, request
 import statistics as stats
+# New imports for WS realtime price
+import asyncio
+from ws_client import WSClient, KlineEvent
 
 
 def _kill_port(port: int) -> None:
@@ -487,7 +490,18 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         "tz": getattr(cfg, "tz", None),
         "log_level": getattr(cfg, "log_level", None),
         "db_path": getattr(cfg, "db_path", "trader.db"),
+        # New: expose ws base for WS price feed
+        "ws_base": getattr(cfg, "ws_base", _default_ws_base(getattr(cfg, "use_testnet", True))),
+        # Optional: expose compute params
+        "boll_multiplier": getattr(cfg, "boll_multiplier", 2.0),
+        "boll_ddof": getattr(cfg, "boll_ddof", 0),
     }
+
+    # New: ensure WS price feed background thread started
+    try:
+        _ensure_ws_price_feed(app)
+    except Exception:
+        pass
 
     @app.get("/api/summary")
     def api_summary() -> Response:
@@ -957,10 +971,14 @@ def _get_realtime_boll(db_path: str, window: int, boll_multiplier: float, boll_d
             rows_closed = [float(r[0]) for r in cur1.fetchall()]
             rows_closed.reverse()  # 按时间正序
 
-            # 最新价格（优先从交易所获取）
+            # 最新价格（优先使用WS，其次REST，最后DB）
             last_close: Optional[float] = None
             source = "db"
-            if symbol:
+            p_ws = _get_ws_price()
+            if p_ws is not None:
+                last_close = float(p_ws)
+                source = "ws"
+            elif symbol:
                 p = _fetch_latest_price(symbol)
                 if p is not None:
                     last_close = p
@@ -1004,3 +1022,57 @@ def _get_realtime_boll(db_path: str, window: int, boll_multiplier: float, boll_d
             }
     except Exception:
         return {"ma": None, "std": None, "up": None, "dn": None, "timestamp": None, "time_local": None, "price": None, "source": None}
+
+
+# New: globals for WS realtime price
+_RT_PRICE_LOCK = threading.Lock()
+_RT_PRICE: Dict[str, Any] = {"price": None, "ts": 0}
+_WS_PRICE_THREAD: Optional[threading.Thread] = None
+
+
+def _get_ws_price() -> Optional[float]:
+    with _RT_PRICE_LOCK:
+        return _RT_PRICE.get("price")
+
+
+def _ensure_ws_price_feed(app: Flask) -> None:
+    global _WS_PRICE_THREAD
+    if _WS_PRICE_THREAD and _WS_PRICE_THREAD.is_alive():
+        return
+    c = app.config.get("SUMMARY_CFG", {})
+    ws_base = c.get("ws_base") or _default_ws_base(bool(c.get("use_testnet", True)))
+    symbol = c.get("symbol") or "BTCUSDT"
+    interval = c.get("interval") or "1m"
+
+    def _runner():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        client = WSClient(ws_base, symbol, interval)
+
+        async def on_kline(evt: KlineEvent):
+            # Update forming bar close as realtime price
+            with _RT_PRICE_LOCK:
+                _RT_PRICE["price"] = float(evt.close)
+                _RT_PRICE["ts"] = int(time.time() * 1000)
+        try:
+            loop.run_until_complete(client.connect_and_listen(on_kline))
+        except Exception:
+            # On exit or error just stop loop
+            try:
+                loop.stop()
+            except Exception:
+                pass
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_runner, name="ws-price-feed", daemon=True)
+    t.start()
+    _WS_PRICE_THREAD = t
+
+
+# Helper: default ws base depending on testnet flag
+def _default_ws_base(use_testnet: bool) -> str:
+    return "wss://stream.binancefuture.com" if use_testnet else "wss://fstream.binance.com"
