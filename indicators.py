@@ -25,7 +25,7 @@ class Indicator:
         # keep last N rows to bound memory
         if len(self.df) > self.max_rows:
             self.df = self.df.iloc[-self.max_rows:].reset_index(drop=True)
-        if len(self.df) < self.window:
+        if len(self.df) < self.window + 5:
             return None, None, None, None
         closes = self.df["close"].tail(self.window)
         ma = closes.mean()
