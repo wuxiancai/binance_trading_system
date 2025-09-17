@@ -5,7 +5,7 @@ class StrategyState:
     position: str = "flat"  # flat | long | short
     pending: str | None = None  # waiting_short_entry | waiting_long_entry | waiting_short_confirm | waiting_long_confirm
     entry_price: float | None = None  # 开仓价格，用于止损计算
-    breakout_level: float | None = None  # 突破的关键价位（上轨或下轨）
+    breakout_level: float | None = None  # 最近一次突破时的关键价位（上轨或下轨），用于提示/记录
 
     def load_from_dict(self, state_dict):
         """从字典加载状态"""
@@ -27,89 +27,84 @@ class StrategyState:
 
 def decide(price: float, up: float, dn: float, state: StrategyState) -> str | None:
     """
-    新的回调确认策略：
-    1. 价格突破BOLL上轨后，回落到上轨价格时 → 开仓做空，如果再次突破上轨则止损
-    2. 价格跌破BOLL下轨后，反弹到下轨价格以上时 → 平空仓+开多仓，如果再次跌破下轨，止损多仓
-    3. 价格突破BOLL上轨后，回落到上轨价格时 → 平多仓+开空仓
-    4. 如此循环，始终保持仓位
+    规则实现：
+    - 从 flat 开始：
+      * 突破上轨 → 等待回调；回落到 <= 上轨时 → 立即开空
+      * 跌破下轨 → 等待反弹；反弹到 >= 下轨时 → 立即开多
+    - 持仓期间：
+      * 空仓：跌破下轨 → 等待反弹；反弹到 >= 下轨时 → 平空开多
+      * 多仓：突破上轨 → 等待回调；回落到 <= 上轨时 → 平多开空
+      * 空仓：价格 > 上轨 时立即止损平仓 → 状态重置为 flat
+      * 多仓：价格 < 下轨 时立即止损平仓 → 状态重置为 flat
     """
     
-    # 处理止损情况
-    if state.position == "short" and state.entry_price and state.breakout_level:
-        # 空仓止损：价格再次突破上轨（breakout_level应该是上轨）
-        if price > state.breakout_level and state.breakout_level == up:
+    # 1) 即刻止损（使用当前上下轨判断，不依赖breakout_level，确保在等待确认阶段也能触发）
+    if state.position == "short":
+        if price > up:  # 价格再次站上上轨，空仓止损
             state.position = "flat"
             state.pending = None
             state.entry_price = None
             state.breakout_level = None
             return "stop_loss_short"
-    
-    if state.position == "long" and state.entry_price and state.breakout_level:
-        # 多仓止损：价格再次跌破下轨（breakout_level应该是下轨）
-        if price < state.breakout_level and state.breakout_level == dn:
+    elif state.position == "long":
+        if price < dn:  # 价格再次跌破下轨，多仓止损
             state.position = "flat"
             state.pending = None
             state.entry_price = None
             state.breakout_level = None
             return "stop_loss_long"
     
-    # 首次开仓逻辑（从flat状态开始）
+    # 2) 首次开仓逻辑（flat）
     if state.position == "flat":
-        # 检测突破上轨，等待回调开空
+        # 记录突破并等待回调/反弹
         if price > up and state.pending != "waiting_short_entry":
             state.pending = "waiting_short_entry"
             state.breakout_level = up
             return None
-        
-        # 检测跌破下轨，等待反弹开多
         if price < dn and state.pending != "waiting_long_entry":
             state.pending = "waiting_long_entry"
             state.breakout_level = dn
             return None
-        
-        # 突破上轨后回落到上轨，开空仓
+
+        # 回调/反弹到轨道触发开仓
         if state.pending == "waiting_short_entry" and price <= up:
             state.position = "short"
             state.pending = None
             state.entry_price = price
-            # breakout_level保持为up，用于止损判断
+            # breakout_level 保留为上轨，便于UI展示
             return "open_short"
-        
-        # 跌破下轨后反弹到下轨以上，开多仓
         if state.pending == "waiting_long_entry" and price >= dn:
             state.position = "long"
             state.pending = None
             state.entry_price = price
-            # breakout_level保持为dn，用于止损判断
+            # breakout_level 保留为下轨，便于UI展示
             return "open_long"
-    
-    # 持仓状态下的平仓+开仓逻辑
+
+    # 3) 持仓后的翻转逻辑
     elif state.position == "short":
-        # 空仓状态下，检测跌破下轨，等待反弹平空开多
+        # 跌破下轨后等待反弹确认
         if price < dn and state.pending != "waiting_long_confirm":
             state.pending = "waiting_long_confirm"
-            state.breakout_level = dn  # 更新为下轨，用于多仓止损
+            # breakout_level 更新为下轨，仅作为记录展示
+            state.breakout_level = dn
             return None
-        
-        # 跌破下轨后反弹到下轨以上，平空开多
         if state.pending == "waiting_long_confirm" and price >= dn:
             state.position = "long"
             state.pending = None
             state.entry_price = price
             return "close_short_open_long"
-    
+
     elif state.position == "long":
-        # 多仓状态下，检测突破上轨，等待回落平多开空
+        # 突破上轨后等待回调确认
         if price > up and state.pending != "waiting_short_confirm":
             state.pending = "waiting_short_confirm"
-            state.breakout_level = up  # 更新为上轨，用于空仓止损
+            # breakout_level 更新为上轨，仅作为记录展示
+            state.breakout_level = up
             return None
-        
-        # 突破上轨后回落到上轨，平多开空
         if state.pending == "waiting_short_confirm" and price <= up:
             state.position = "short"
             state.pending = None
             state.entry_price = price
             return "close_long_open_short"
-    
+
     return None

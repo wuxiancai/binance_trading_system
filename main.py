@@ -119,9 +119,9 @@ async def main():
         # persist kline
         await db.insert_kline(k)
         ma, std, up, dn = ind.add_kline(k)
-        if ma is None:
-            return
-        await db.upsert_indicator(k.open_time, ma, std, up, dn)
+        # 仅在K线收盘时写入指标，并以该已收盘K线的open_time入库，保证与交易所时间同步
+        if k.is_closed and (ma is not None):
+            await db.upsert_indicator(k.open_time, ma, std, up, dn)
 
         # 检查是否有足够的K线数据（至少21根）才执行交易
         if len(ind.df) < cfg.window + 1:  # window=20, 所以需要至少21根

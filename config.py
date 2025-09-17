@@ -63,7 +63,7 @@ class Config:
     # ---------------------------
     # 端点配置（可用环境覆盖）
     # ---------------------------
-    ws_base: str = "wss://fstream.binancefuture.com"  # 行情 WebSocket 基础地址（默认测试网 Futures Testnet 公共行情流）
+    ws_base: str = "wss://stream.binancefuture.com"  # 行情 WebSocket 基础地址（默认测试网 Futures Testnet 公共行情流）
     rest_base: str = "https://testnet.binancefuture.com"  # REST 下单基础地址（默认测试网）
 
 
