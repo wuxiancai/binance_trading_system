@@ -40,7 +40,7 @@ class Config:
     # 指标参数（布林带）
     # ---------------------------
     boll_multiplier: float = 2.0          # 布林带倍数（默认 2.0）
-    boll_ddof: int = 1                    # 标准差自由度 ddof（1 更接近币安计算方式）
+    boll_ddof: int = 0                    # 标准差自由度 ddof（1 更接近币安计算方式）
     indicator_max_rows: int = 200         # 指标缓存的最大行数（用于限制内存）
 
     # ---------------------------
