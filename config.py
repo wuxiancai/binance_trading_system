@@ -15,7 +15,7 @@ class Config:
     # ---------------------------
     log_level: str = "INFO"              # 日志等级：DEBUG/INFO/WARN/ERROR
     db_path: str = "trader.db"            # SQLite 数据库文件路径
-    tz: str = "Asia/Shanghai"                       # 时区（仅用于日志/显示）
+    tz: str = "UTC"                       # 时区（仅用于日志/显示）
 
     # ---------------------------
     # 交易所与订阅参数
@@ -33,7 +33,7 @@ class Config:
     stop_loss_pct: float = 0.02           # 止损百分比（0.02 表示 2%）
     max_position_pct: float = 0.1         # 单次最大仓位占可用 USDT 的比例（1.0 表示 100%）
     leverage: int = 10                    # 杠杆倍数
-    only_on_close: bool = True            # 仅在 K 线收盘时触发策略信号
+    only_on_close: bool = False            # 仅在 K 线收盘时触发策略信号
     stop_loss_enabled: bool = True        # 是否在开仓后自动挂止损单
 
     # ---------------------------
