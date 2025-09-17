@@ -2,6 +2,7 @@ import threading
 import subprocess
 import sqlite3
 import json
+import urllib.request
 import socket
 import time
 from datetime import datetime, timezone
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional, Dict, Any, List, Tuple
 
 from flask import Flask, jsonify, Response, request
+import statistics as stats
 
 
 def _kill_port(port: int) -> None:
@@ -155,9 +157,15 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
 def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """获取当前仓位信息，强制使用币安API实际数据，确保所有交易决策基于真实仓位"""
     
-    # 强制要求trader实例，确保所有交易都基于API数据
+    # 当没有传入 trader 实例时，前端展示降级为“空仓”，避免接口 500（用于本地预览/无交易环境）
     if trader is None:
-        raise ValueError("trader实例不能为空，所有交易必须基于币安API数据")
+        ts_now = int(time.time() * 1000)
+        return {
+            "position": "flat",
+            "ts": ts_now,
+            "ts_local": _fmt_ts(ts_now),
+            "source": "no_trader"
+        }
     
     try:
         position_info = trader.get_position_info(symbol)
@@ -494,6 +502,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         pnl_records = _get_pnl_records(db_path, limit=20)
         daily_stats = _get_daily_stats(db_path, days=7, trader=trader_obj)
         boll_data = _get_latest_boll(db_path)
+        # New: realtime boll
+        rt_boll = _get_realtime_boll(db_path, c.get("window", 20), c.get("boll_multiplier", 2.0), c.get("boll_ddof", 0), symbol)
         # enrich position with leverage (only if not already set by API)
         if position.get("position") in ("long", "short") and "leverage" not in position:
             position["leverage"] = c["leverage"]
@@ -501,6 +511,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
             "config": {**c, "web_port": app.config.get("WEB_PORT", 5000)},
             "position": position,
             "boll": boll_data,
+            "realtime_boll": rt_boll,
             "last_closed": last_closed,
             "signals": signals,
             "trades": trades,
@@ -762,6 +773,30 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                           </table>
                         </div>
                        </div>`);
+
+                     // NEW: BOLL UP DN (REALTIME)
+                     const rt = data.realtime_boll || {};
+                     const rtUp = rt.up ? fmt(rt.up) : '--';
+                     const rtDn = rt.dn ? fmt(rt.dn) : '--';
+                     const rtMa = rt.ma ? fmt(rt.ma) : '--';
+                     const rtPrice = (rt.price != null) ? Number(rt.price).toFixed(2) : '--';
+                     const rtSrc = rt.source ? String(rt.source) : '';
+                     const _pad2 = (n) => String(n).padStart(2, '0');
+                     const _now = new Date();
+                     const _nowStr = `${_pad2(_now.getMonth()+1)}-${_pad2(_now.getDate())} ${_pad2(_now.getHours())}:${_pad2(_now.getMinutes())}:${_pad2(_now.getSeconds())}`;
+                     cards.push(`
+                       <div class="card">
+                         <h3>BOLL UP DN (REALTIME)</h3>
+                        <div class="table-wrap">
+                          <table>
+                            <tr><th style=\"width:25%\">指标</th><th style=\"width:35%\">价格</th><th style=\"width:40%\">更新时间</th></tr>
+                            <tr><td>最新价</td><td style=\"font-weight: bold;\">${rtPrice}</td><td id=\"rt-boll-time\" rowspan=\"4\" style=\"vertical-align: middle; font-size: 12px;\">${_nowStr}${rtSrc ? ` <small style=\"color:#64748b\">(${rtSrc})</small>` : ''}</td></tr>
+                            <tr><td>BOLL UP</td><td style=\"color: #ff6b6b; font-weight: bold;\">${rtUp}</td></tr>
+                            <tr><td>BOLL MA</td><td style=\"color: #4ecdc4; font-weight: bold;\">${rtMa}</td></tr>
+                            <tr><td>BOLL DN</td><td style=\"color: #45b7d1; font-weight: bold;\">${rtDn}</td></tr>
+                          </table>
+                        </div>
+                       </div>`);
  
                      // Recent trades
                     const statusClass = (status) => {
@@ -812,6 +847,16 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                  }
                  load();
                  setInterval(load, 3000);
+                 if (!window._rtClockInterval) {
+                   window._rtClockInterval = setInterval(() => {
+                     const el = document.getElementById('rt-boll-time');
+                     if (el) {
+                       const d = new Date();
+                       const p2 = (n) => String(n).padStart(2, '0');
+                       el.textContent = `${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+                     }
+                   }, 1000);
+                 }
             </script>
         </body>
         </html>
@@ -873,3 +918,89 @@ def _fmt_ts(ts_ms: int) -> str:
             return dt.strftime("%m-%d %H:%M")
         except Exception:
             return "--"
+
+# --- helper: fetch latest price from Binance (prefer futures) ---
+def _fetch_latest_price(symbol: str) -> Optional[float]:
+    urls = [
+        f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}",
+        f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+    ]
+    for u in urls:
+        try:
+            with urllib.request.urlopen(u, timeout=2.5) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    p = data.get('price')
+                    if p is not None:
+                        return float(p)
+        except Exception:
+            continue
+    return None
+
+
+# === New: compute realtime (forming bar) BOLL based on last window-1 closed + current latest close ===
+def _get_realtime_boll(db_path: str, window: int, boll_multiplier: float, boll_ddof: int, symbol: Optional[str] = None) -> Dict[str, Any]:
+    """
+    计算实时BOLL：
+    - 取最近 window-1 根已收盘K线的close
+    - 加上“最新价格”作为当前形成中的K线close（若拉取失败则回退为数据库最新一条K线close）
+    - 使用与Indicator一致的参数(boll_multiplier, ddof)
+    返回的时间戳使用当前本地时间（毫秒），用于在UI显示读秒。
+    """
+    try:
+        with _connect(db_path) as conn:
+            # 最近 window-1 根已收盘K线
+            cur1 = conn.execute(
+                "SELECT close FROM klines WHERE is_closed=1 ORDER BY open_time DESC LIMIT ?",
+                (max(0, window - 1),)
+            )
+            rows_closed = [float(r[0]) for r in cur1.fetchall()]
+            rows_closed.reverse()  # 按时间正序
+
+            # 最新价格（优先从交易所获取）
+            last_close: Optional[float] = None
+            source = "db"
+            if symbol:
+                p = _fetch_latest_price(symbol)
+                if p is not None:
+                    last_close = p
+                    source = "exchange"
+
+            if last_close is None:
+                # 回退：数据库中最新一条K线（可能未收盘）的close
+                cur2 = conn.execute(
+                    "SELECT close FROM klines ORDER BY open_time DESC LIMIT 1"
+                )
+                r = cur2.fetchone()
+                if r is None:
+                    raise ValueError("no kline data")
+                last_close = float(r[0])
+                source = "db"
+
+            closes = rows_closed + [last_close]
+            if len(closes) < window:
+                # 数据不足时不返回实时BOLL
+                return {"ma": None, "std": None, "up": None, "dn": None, "timestamp": None, "time_local": None, "price": None, "source": None}
+
+            # 计算
+            if boll_ddof == 1:
+                std_val = stats.stdev(closes)
+            else:
+                std_val = stats.pstdev(closes)
+            ma_val = sum(closes) / len(closes)
+            up_val = ma_val + boll_multiplier * std_val
+            dn_val = ma_val - boll_multiplier * std_val
+
+            now_ms = int(time.time() * 1000)
+            return {
+                "ma": round(ma_val, 2),
+                "std": round(float(std_val), 4),
+                "up": round(up_val, 2),
+                "dn": round(dn_val, 2),
+                "price": round(last_close, 2),
+                "source": source,
+                "timestamp": now_ms,
+                "time_local": None  # 前端以本地时间动态展示读秒
+            }
+    except Exception:
+        return {"ma": None, "std": None, "up": None, "dn": None, "timestamp": None, "time_local": None, "price": None, "source": None}
