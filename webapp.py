@@ -509,6 +509,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
 
     @app.post("/api/test_order")
     def api_test_order() -> Response:
+        # 已禁用测试下单接口
+        return jsonify({"ok": False, "error": "test order API disabled"}), 404
         c = app.config["SUMMARY_CFG"]
         trader_obj = app.config.get("TRADER")
         if trader_obj is None:
@@ -585,7 +587,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                  }
                  .container{ max-width: 1600px; margin: 0 auto; padding: 16px 12px; }
                  .header{ 
-                   display:flex; align-items:center; justify-content:space-between; 
+                   display:flex; align-items:center; justify-content:center; 
                    margin-bottom: 20px; padding: 16px 20px; background: rgba(255,255,255,0.95); 
                    border-radius: 12px; box-shadow: var(--shadow);
                  }
@@ -597,9 +599,9 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                  .btn:hover{ transform: translateY(-1px); box-shadow: var(--shadow-lg); }
                  .btn.warn{ border-color:var(--danger); background:var(--danger); }
                  .btn.warn:hover{ background:#dc2626; }
-                 h1 { margin: 0; font-size: 24px; font-weight: 700; color: var(--fg); letter-spacing: -0.3px; }
+                 h1 { margin: 0; font-size: 24px; font-weight: 700; color: var(--fg); letter-spacing: -0.3px; text-align:center; width: 100%; }
                  small { color: var(--muted); }
-                 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 16px; align-items:start; max-width: 1600px; margin-left: auto; margin-right: auto; }
+                 .grid { display: grid; grid-template-columns: repeat(2, minmax(420px, 1fr)); gap: 16px; align-items:start; max-width: 1600px; margin-left: auto; margin-right: auto; }
                  .card { 
                    background:var(--card); border: 1px solid var(--border); border-radius: 12px; 
                    padding: 16px; box-shadow: var(--shadow); transition: all 0.2s ease;
@@ -636,10 +638,6 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
             <div class="container">
               <div class="header">
                 <h1>Binance Trader Dashboard</h1>
-                <div>
-                  <button class="btn" onclick="testOrder('BUY')">测试买入</button>
-                  <button class="btn warn" onclick="testOrder('SELL')">测试卖出</button>
-                </div>
               </div>
               <div class="grid" id="cards"></div>
             </div>
@@ -654,20 +652,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                    if (u === 'SHORT') return 'dir-short';
                    return '';
                  };
-                 async function testOrder(side){
-                     try{
-                        const res = await fetch('/api/test_order', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({side, percent: 0.01})});
-                        const data = await res.json();
-                        if(!res.ok || !data.ok){
-                           alert('下单失败: ' + (data.error || res.statusText));
-                           return;
-                        }
-                        alert(`下单成功: ${data.side} qty=${data.qty} price=${data.price}`);
-                        load();
-                     }catch(err){
-                        alert('请求失败: ' + err);
-                     }
-                 }
+                 // 已移除 testOrder 函数与相关按钮
 
                  async function load() {
                      const res = await fetch('/api/summary');
