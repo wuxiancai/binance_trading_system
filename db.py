@@ -149,3 +149,14 @@ class DB:
                         'breakout_level': row['breakout_level']
                     }
                 return None
+
+    async def get_recent_klines(self, limit: int = 30):
+        """获取最近的K线数据，按时间升序返回"""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT open_time, close_time, open, high, low, close, volume FROM klines ORDER BY open_time DESC LIMIT ?",
+                (limit,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                # 返回升序排列的数据（最老的在前面）
+                return list(reversed(rows))

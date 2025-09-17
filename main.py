@@ -84,6 +84,23 @@ async def main():
 
     # indicator
     ind = Indicator(window=cfg.window, boll_multiplier=cfg.boll_multiplier, boll_ddof=cfg.boll_ddof, max_rows=cfg.indicator_max_rows)
+    
+    # 从数据库加载历史K线数据到indicators
+    historical_klines = await db.get_recent_klines(cfg.window + 10)  # 多加载一些数据确保足够
+    for kline_data in historical_klines:
+        # 创建KlineEvent对象
+        k = KlineEvent(
+            open_time=kline_data[0],
+            close_time=kline_data[1], 
+            open=kline_data[2],
+            high=kline_data[3],
+            low=kline_data[4],
+            close=kline_data[5],
+            volume=kline_data[6],
+            is_closed=True
+        )
+        ind.add_kline(k)
+    logging.info(f"Loaded {len(historical_klines)} historical klines into indicators")
 
     # ws
     ws = WSClient(cfg.ws_base, cfg.symbol, cfg.interval,
@@ -105,6 +122,11 @@ async def main():
         if ma is None:
             return
         await db.upsert_indicator(k.open_time, ma, std, up, dn)
+
+        # 检查是否有足够的K线数据（至少21根）才执行交易
+        if len(ind.df) < cfg.window + 1:  # window=20, 所以需要至少21根
+            logging.info(f"等待更多K线数据，当前: {len(ind.df)}/{cfg.window + 1}")
+            return
 
         # 仅在K线收盘处理策略（可配置）
         if cfg.only_on_close and not k.is_closed:
