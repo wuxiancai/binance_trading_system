@@ -13,7 +13,7 @@ class Config:
     # ---------------------------
     # 应用运行级参数（通用）
     # ---------------------------
-    log_level: str = "DEBUG"              # 日志等级：DEBUG/INFO/WARN/ERROR
+    log_level: str = "INFO"              # 日志等级：DEBUG/INFO/WARN/ERROR
     db_path: str = "trader.db"            # SQLite 数据库文件路径
     tz: str = "Asia/Shanghai"                       # 时区（仅用于日志/显示）
 
