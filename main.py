@@ -85,10 +85,11 @@ async def main():
     # indicator
     ind = Indicator(window=cfg.window, boll_multiplier=cfg.boll_multiplier, boll_ddof=cfg.boll_ddof, max_rows=cfg.indicator_max_rows)
     
-    # 从数据库加载历史K线数据到indicators
-    historical_klines = await db.get_recent_klines(cfg.window + 10)  # 多加载一些数据确保足够
+    # 从数据库加载历史K线数据到indicators，并回填指标到数据库（仅已收盘K线）
+    historical_klines = await db.get_recent_klines(cfg.window + 50)  # 多加载一些数据确保足够
+    backfill_cnt = 0
     for kline_data in historical_klines:
-        # 创建KlineEvent对象
+        # 创建KlineEvent对象（历史数据均视为已收盘）
         k = KlineEvent(
             open_time=kline_data[0],
             close_time=kline_data[1], 
@@ -99,8 +100,12 @@ async def main():
             volume=kline_data[6],
             is_closed=True
         )
-        ind.add_kline(k)
-    logging.info(f"Loaded {len(historical_klines)} historical klines into indicators")
+        ma, std, up, dn = ind.add_kline(k)
+        if ma is not None:
+            # 回填该已收盘K线的指标
+            await db.upsert_indicator(k.open_time, ma, std, up, dn)
+            backfill_cnt += 1
+    logging.info(f"Loaded {len(historical_klines)} historical klines into indicators, backfilled {backfill_cnt} indicators")
 
     # ws
     ws = WSClient(cfg.ws_base, cfg.symbol, cfg.interval,
