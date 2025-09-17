@@ -269,43 +269,16 @@ def _compute_last_closed_pnl(db_path: str) -> Optional[Dict[str, Any]]:
 
 
 def _latest_price(db_path: str) -> Optional[float]:
+    """获取最新价格（从最新的K线数据）"""
     try:
         with _connect(db_path) as conn:
-            cur = conn.execute("SELECT close FROM klines ORDER BY close_time DESC LIMIT 1")
+            cur = conn.execute("SELECT close FROM klines ORDER BY open_time DESC LIMIT 1")
             row = cur.fetchone()
-            if row and (row["close"] is not None):
+            if row:
                 return float(row["close"])
     except Exception:
         pass
     return None
-
-
-def _get_latest_boll(db_path: str) -> Dict[str, Any]:
-    """获取最新的BOLL指标数据"""
-    try:
-        with _connect(db_path) as conn:
-            cur = conn.execute("SELECT ma, std, up, dn, open_time FROM indicators ORDER BY open_time DESC LIMIT 1")
-            row = cur.fetchone()
-            if row:
-                return {
-                    "ma": round(float(row["ma"]), 2) if row["ma"] is not None else None,
-                    "std": round(float(row["std"]), 4) if row["std"] is not None else None,
-                    "up": round(float(row["up"]), 2) if row["up"] is not None else None,
-                    "dn": round(float(row["dn"]), 2) if row["dn"] is not None else None,
-                    "timestamp": row["open_time"],
-                    # 这里展示的时间是“最后一个已收盘K线”的开盘时间
-                    "time_local": _fmt_ts(row["open_time"]) if row["open_time"] else None
-                }
-    except Exception as e:
-        pass
-    return {
-        "ma": None,
-        "std": None,
-        "up": None,
-        "dn": None,
-        "timestamp": None,
-        "time_local": None
-    }
 
 
 def _get_pnl_records(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -515,7 +488,6 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         trades = _recent_trades(db_path, limit=20)
         pnl_records = _get_pnl_records(db_path, limit=20)
         daily_stats = _get_daily_stats(db_path, days=7, trader=trader_obj)
-        boll_data = _get_latest_boll(db_path)
         # New: realtime boll
         rt_boll = _get_realtime_boll(db_path, c.get("window", 20), c.get("boll_multiplier", 2.0), c.get("boll_ddof", 0), symbol)
         # enrich position with leverage (only if not already set by API)
@@ -524,7 +496,6 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         return jsonify({
             "config": {**c, "web_port": app.config.get("WEB_PORT", 5000)},
             "position": position,
-            "boll": boll_data,
             "realtime_boll": rt_boll,
             "last_closed": last_closed,
             "signals": signals,
@@ -768,27 +739,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                         </div>
                        </div>`);
 
-                     // BOLL UP DN Card
-                     const bollData = data.boll || {};
-                     const bollUp = bollData.up ? fmt(bollData.up) : '--';
-                     const bollDn = bollData.dn ? fmt(bollData.dn) : '--';
-                     const bollMa = bollData.ma ? fmt(bollData.ma) : '--';
-                     const bollTime = bollData.time_local || '--';
-                     const interval = data.config?.interval || '1m';
-                     cards.push(`
-                       <div class="card">
-                         <h3>BOLL UP DN (${interval})</h3>
-                        <div class="table-wrap">
-                          <table>
-                            <tr><th style="width:25%">指标</th><th style="width:35%">价格</th><th style="width:40%">更新时间</th></tr>
-                            <tr><td>BOLL UP</td><td style="color: #ff6b6b; font-weight: bold;">${bollUp}</td><td rowspan="3" style="vertical-align: middle; font-size: 12px;">${bollTime}</td></tr>
-                            <tr><td>BOLL MA</td><td style="color: #4ecdc4; font-weight: bold;">${bollMa}</td></tr>
-                            <tr><td>BOLL DN</td><td style="color: #45b7d1; font-weight: bold;">${bollDn}</td></tr>
-                          </table>
-                        </div>
-                       </div>`);
-
-                     // NEW: BOLL UP DN (REALTIME)
+                     // BOLL UP DN (REALTIME)
                      const rt = data.realtime_boll || {};
                      const rtUp = rt.up ? fmt(rt.up) : '--';
                      const rtDn = rt.dn ? fmt(rt.dn) : '--';
