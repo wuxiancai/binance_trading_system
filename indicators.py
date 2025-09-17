@@ -25,9 +25,11 @@ class Indicator:
         # keep last N rows to bound memory
         if len(self.df) > self.max_rows:
             self.df = self.df.iloc[-self.max_rows:].reset_index(drop=True)
-        if len(self.df) < self.window + 5:
+        # 使用已收盘的K线来计算BOLL，保证与交易所一致
+        closed_df = self.df[self.df["is_closed"] == True]
+        if len(closed_df) < self.window:
             return None, None, None, None
-        closes = self.df["close"].tail(self.window)
+        closes = closed_df["close"].tail(self.window)
         ma = closes.mean()
         std = closes.std(ddof=self.boll_ddof)
         up = ma + self.boll_multiplier * std

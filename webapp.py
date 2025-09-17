@@ -282,6 +282,7 @@ def _get_latest_boll(db_path: str) -> Dict[str, Any]:
                     "up": round(float(row["up"]), 2) if row["up"] is not None else None,
                     "dn": round(float(row["dn"]), 2) if row["dn"] is not None else None,
                     "timestamp": row["open_time"],
+                    # 这里展示的时间是“最后一个已收盘K线”的开盘时间
                     "time_local": _fmt_ts(row["open_time"]) if row["open_time"] else None
                 }
     except Exception as e:
