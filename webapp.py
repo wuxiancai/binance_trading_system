@@ -582,11 +582,11 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                    color: var(--fg); 
                    line-height: 1.6;
                  }
-                 .container{ max-width: 1600px; margin: 0 auto; padding: 16px 12px; }
+                 .container{ max-width: 1600px; margin: 0 auto; padding: 8px 8px; }
                  .header{ 
                    display:flex; align-items:center; justify-content:center; 
-                   margin-bottom: 20px; padding: 16px 20px; background: rgba(255,255,255,0.95); 
-                   border-radius: 12px; box-shadow: var(--shadow);
+                   margin-bottom: 12px; padding: 8px 16px; background: rgba(255,255,255,0.95); 
+                   border-radius: 8px; box-shadow: var(--shadow);
                  }
                  .btn{ 
                    appearance:none; border:2px solid var(--accent); background:var(--accent); color:white; 
@@ -726,20 +726,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                        return Number(pnl) >= 0 ? 'pnl-profit' : 'pnl-loss';
                      };
 
-                     // Daily Stats (placed right after position)
-                     const statsRows = (data.daily_stats || []).map(s => `<tr><td>${s.date}</td><td>${s.trades_count}</td><td><span class="${pnlClass(s.total_pnl)}">${fmt(s.total_pnl)}</span></td><td><span class="${pnlClass(s.profit_rate)}">${fmt(s.profit_rate)}%</span></td></tr>`).join('');
-                     cards.push(`
-                       <div class="card">
-                         <h3>每日交易统计</h3>
-                        <div class="table-wrap">
-                          <table>
-                            <tr><th style="width:28%">日期</th><th style="width:20%">次数</th><th style="width:26%">利润总和</th><th style="width:26%">利润率</th></tr>
-                            ${statsRows}
-                          </table>
-                        </div>
-                       </div>`);
-
-                     // BOLL UP DN (REALTIME)
+                     // BOLL UP DN (REALTIME) - moved to first position
                      const rt = data.realtime_boll || {};
                      const rtUp = rt.up ? fmt(rt.up) : '--';
                      const rtDn = rt.dn ? fmt(rt.dn) : '--';
@@ -759,6 +746,19 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                             <tr><td>BOLL UP</td><td style=\"color: #ff6b6b; font-weight: bold;\">${rtUp}</td></tr>
                             <tr><td>BOLL MA</td><td style=\"color: #4ecdc4; font-weight: bold;\">${rtMa}</td></tr>
                             <tr><td>BOLL DN</td><td style=\"color: #45b7d1; font-weight: bold;\">${rtDn}</td></tr>
+                          </table>
+                        </div>
+                       </div>`);
+
+                     // Daily Stats (moved to second position)
+                     const statsRows = (data.daily_stats || []).map(s => `<tr><td>${s.date}</td><td>${s.trades_count}</td><td><span class="${pnlClass(s.total_pnl)}">${fmt(s.total_pnl)}</span></td><td><span class="${pnlClass(s.profit_rate)}">${fmt(s.profit_rate)}%</span></td></tr>`).join('');
+                     cards.push(`
+                       <div class="card">
+                         <h3>每日交易统计</h3>
+                        <div class="table-wrap">
+                          <table>
+                            <tr><th style="width:28%">日期</th><th style="width:20%">次数</th><th style="width:26%">利润总和</th><th style="width:26%">利润率</th></tr>
+                            ${statsRows}
                           </table>
                         </div>
                        </div>`);
