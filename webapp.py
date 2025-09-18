@@ -596,26 +596,26 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                  .btn:hover{ transform: translateY(-1px); box-shadow: var(--shadow-lg); }
                  .btn.warn{ border-color:var(--danger); background:var(--danger); }
                  .btn.warn:hover{ background:#dc2626; }
-                 h1 { margin: 0; font-size: 24px; font-weight: 700; color: var(--fg); letter-spacing: -0.3px; text-align:center; width: 100%; }
+                 h1 { margin: 0; font-size: 20px; font-weight: 700; color: var(--fg); letter-spacing: -0.3px; text-align:center; width: 100%; }
                  small { color: var(--muted); }
-                 .grid { display: grid; grid-template-columns: repeat(2, minmax(420px, 1fr)); gap: 16px; align-items:start; max-width: 1600px; margin-left: auto; margin-right: auto; }
+                 .grid { display: grid; grid-template-columns: repeat(2, minmax(420px, 1fr)); gap: 10px; align-items:start; max-width: 1600px; margin-left: auto; margin-right: auto; }
                  .card { 
-                   background:var(--card); border: 1px solid var(--border); border-radius: 12px; 
-                   padding: 16px; box-shadow: var(--shadow); transition: all 0.2s ease;
+                   background:var(--card); border: 1px solid var(--border); border-radius: 8px; 
+                   padding: 12px; box-shadow: var(--shadow); transition: all 0.2s ease;
                  }
                  .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-                 .card h3{ margin: 0 0 12px; font-size: 16px; font-weight: 600; color: var(--fg); }
+                 .card h3{ margin: 0 0 8px; font-size: 15px; font-weight: 600; color: var(--fg); }
                  .table-wrap{ max-height: 350px; overflow:auto; border-radius: 6px; }
                  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
                  th, td { 
-                   border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: left; 
+                   border-bottom: 1px solid var(--border); padding: 6px 4px; text-align: left; 
                    white-space: nowrap; overflow:hidden; text-overflow: ellipsis; font-size: 13px; 
-                   line-height: 1.4;
+                   line-height: 1.3;
                  }
                  th { 
                    position: sticky; top: 0; background: var(--thead); z-index: 1; 
                    font-weight: 600; color: var(--fg); text-transform: uppercase; 
-                   font-size: 11px; letter-spacing: 0.3px; padding: 6px;
+                   font-size: 11px; letter-spacing: 0.3px; padding: 4px;
                  }
                  .ok { color: var(--success); font-weight: 600; }
                  .warn { color: var(--warning); font-weight: 600; }

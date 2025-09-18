@@ -27,16 +27,17 @@ class StrategyState:
 
 def decide(price: float, up: float, dn: float, state: StrategyState) -> str | None:
     """
-    规则实现：
-    - 从 flat 开始：
-      * 突破上轨 → 等待回调；回落到 <= 上轨时 → 立即开空
-      * 跌破下轨 → 等待反弹；反弹到 >= 下轨时 → 立即开多
-    - 持仓期间：
-      * 空仓：跌破下轨 → 等待反弹；反弹到 >= 下轨时 → 平空开多
-      * 多仓：突破上轨 → 等待回调；回落到 <= 上轨时 → 平多开空
-      * 空仓：价格 > 上轨 时立即止损平仓 → 状态重置为 flat
-      * 多仓：价格 < 下轨 时立即止损平仓 → 状态重置为 flat
+    基于布林带的突破回调策略
+    
+    策略逻辑：
+    1. 价格突破上轨 -> 等待回调到上轨 -> 开空仓
+    2. 价格突破下轨 -> 等待反弹到下轨 -> 开多仓
+    3. 持仓期间，价格再次突破对应轨道则止损
     """
+    
+    # 检查关键参数是否为None，避免TypeError
+    if up is None or dn is None:
+        return None
     
     # 1) 即刻止损（使用当前上下轨判断，不依赖breakout_level，确保在等待确认阶段也能触发）
     if state.position == "short":
