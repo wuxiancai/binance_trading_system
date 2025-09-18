@@ -237,7 +237,10 @@ async def main():
             state.position, 
             state.pending, 
             state.entry_price, 
-            state.breakout_level
+            state.breakout_level,
+            state.breakout_up,
+            state.breakout_dn,
+            state.last_close_price
         )
 
     await ws.connect_and_listen(on_kline)

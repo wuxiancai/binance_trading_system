@@ -157,6 +157,28 @@ def _recent_trades(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
         return rows
 
 
+def _get_latest_open_time(db_path: str) -> Optional[int]:
+    """获取最近的开仓时间"""
+    with _connect(db_path) as conn:
+        # 查找最近的开仓交易（状态为NEW的开仓交易）
+        cur = conn.execute(
+            "SELECT ts FROM trades WHERE side IN ('BUY_OPEN', 'SELL_OPEN', 'BUY', 'SELL') AND status = 'NEW' ORDER BY ts DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        if row:
+            return row["ts"]
+        
+        # 如果没有找到NEW状态的开仓交易，查找最近的开仓交易
+        cur = conn.execute(
+            "SELECT ts FROM trades WHERE side IN ('BUY_OPEN', 'SELL_OPEN', 'BUY', 'SELL') ORDER BY ts DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        if row:
+            return row["ts"]
+        
+        return None
+
+
 def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol: str = "BTCUSDT") -> Dict[str, Any]:
     """获取当前仓位信息，强制使用币安API实际数据，确保所有交易决策基于真实仓位"""
     
@@ -173,7 +195,12 @@ def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol
     try:
         position_info = trader.get_position_info(symbol)
         if position_info is not None:
-            # 有实际仓位
+            # 有实际仓位，获取实际的开仓时间
+            open_time = _get_latest_open_time(db_path)
+            if open_time is None:
+                # 如果没有找到开仓时间，使用当前时间
+                open_time = int(time.time() * 1000)
+            
             return {
                 "position": position_info["position_side"],
                 "contract": position_info["contract"],  # 合约名称
@@ -187,8 +214,8 @@ def _compute_current_position(db_path: str, trader: Optional[Any] = None, symbol
                 "leverage": position_info["leverage"],
                 "margin_ratio": position_info["margin_ratio"],  # 保证金比例
                 "liquidation_price": position_info["liquidation_price"],  # 强平价格
-                "ts": int(time.time() * 1000),
-                "ts_local": _fmt_ts(int(time.time() * 1000)),
+                "ts": open_time,  # 使用实际的开仓时间
+                "ts_local": _fmt_ts(open_time),  # 使用实际的开仓时间
                 "source": "binance_api"
             }
         else:
@@ -490,6 +517,8 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         daily_stats = _get_daily_stats(db_path, days=7, trader=trader_obj)
         # New: realtime boll
         rt_boll = _get_realtime_boll(db_path, c.get("window", 20), c.get("boll_multiplier", 2.0), c.get("boll_ddof", 0), symbol)
+        # New: strategy status
+        strategy_status = _get_strategy_status(db_path)
         # enrich position with leverage (only if not already set by API)
         if position.get("position") in ("long", "short") and "leverage" not in position:
             position["leverage"] = c["leverage"]
@@ -497,6 +526,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
             "config": {**c, "web_port": app.config.get("WEB_PORT", 5000)},
             "position": position,
             "realtime_boll": rt_boll,
+            "strategy_status": strategy_status,
             "last_closed": last_closed,
             "signals": signals,
             "trades": trades,
@@ -664,16 +694,16 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                      <div class="card">
                          <h3>当前配置</h3>
                          <table>
-                           <tr><th>Symbol</th><td>${cfg.symbol}</td></tr>
-                           <tr><th>Interval</th><td>${cfg.interval}</td></tr>
+                           <tr><th>合约币对</th><td>${cfg.symbol}</td></tr>
+                           <tr><th>K线时间窗口</th><td>${cfg.interval}</td></tr>
                            <tr><th>Testnet</th><td>${boolCell(cfg.use_testnet)}</td></tr>
-                           <tr><th>Leverage</th><td>${cfg.leverage}</td></tr>
-                           <tr><th>Max Position %</th><td>${cfg.max_position_pct}</td></tr>
-                           <tr><th>Window</th><td>${cfg.window}</td></tr>
-                           <tr><th>Only On Close</th><td>${boolCell(cfg.only_on_close)}</td></tr>
-                           <tr><th>Stop Loss</th><td>${boolCell(cfg.stop_loss_enabled)} (pct=${cfg.stop_loss_pct})</td></tr>
-                           <tr><th>TZ</th><td>${cfg.tz}</td></tr>
-                           <tr><th>Log</th><td>${cfg.log_level}</td></tr>
+                           <tr><th>杠杆</th><td>${cfg.leverage}</td></tr>
+                           <tr><th>最大仓位 %</th><td>${cfg.max_position_pct}</td></tr>
+                           <tr><th>WINDOW</th><td>${cfg.window}</td></tr>
+                           <tr><th>K 线是否仅在收盘时执行</th><td>${boolCell(cfg.only_on_close)}</td></tr>
+                           <tr><th>止损</th><td>${boolCell(cfg.stop_loss_enabled)} (pct=${cfg.stop_loss_pct})</td></tr>
+                           <tr><th>时区</th><td>${cfg.tz}</td></tr>
+                           <tr><th>日志级别</th><td>${cfg.log_level}</td></tr>
                            <tr><th>Web Port</th><td>${cfg.web_port}</td></tr>
                          </table>
                      </div>`);
@@ -736,16 +766,26 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                      const _pad2 = (n) => String(n).padStart(2, '0');
                      const _now = new Date();
                      const _nowStr = `${_pad2(_now.getMonth()+1)}-${_pad2(_now.getDate())} ${_pad2(_now.getHours())}:${_pad2(_now.getMinutes())}:${_pad2(_now.getSeconds())}`;
+                     
+                     // Strategy status
+                     const strategy = data.strategy_status || {};
+                     const breakoutUp = strategy.breakout_up ? 'YES' : 'NO';
+                     const breakoutDn = strategy.breakout_dn ? 'YES' : 'NO';
+                     const status = strategy.status || 'NONE';
+                     const breakoutUpColor = strategy.breakout_up ? '#ff6b6b' : '#64748b';
+                     const breakoutDnColor = strategy.breakout_dn ? '#45b7d1' : '#64748b';
+                     const statusColor = status === 'waiting_for_long' ? '#4ecdc4' : status === 'waiting_for_short' ? '#ff6b6b' : '#64748b';
+                     
                      cards.push(`
                        <div class="card">
                          <h3>BOLL UP DN (REALTIME)</h3>
                         <div class="table-wrap">
                           <table>
-                            <tr><th style=\"width:25%\">指标</th><th style=\"width:35%\">价格</th><th style=\"width:40%\">更新时间</th></tr>
-                            <tr><td>最新价</td><td style=\"font-weight: bold;\">${rtPrice}</td><td id=\"rt-boll-time\" rowspan=\"4\" style=\"vertical-align: middle; font-size: 12px;\">${_nowStr}${rtSrc ? ` <small style=\"color:#64748b\">(${rtSrc})</small>` : ''}</td></tr>
-                            <tr><td>BOLL UP</td><td style=\"color: #ff6b6b; font-weight: bold;\">${rtUp}</td></tr>
-                            <tr><td>BOLL MA</td><td style=\"color: #4ecdc4; font-weight: bold;\">${rtMa}</td></tr>
-                            <tr><td>BOLL DN</td><td style=\"color: #45b7d1; font-weight: bold;\">${rtDn}</td></tr>
+                            <tr><th style=\"width:20%\">指标</th><th style=\"width:25%\">价格</th><th style=\"width:25%\">更新时间</th><th style=\"width:30%\">策略状态</th></tr>
+                            <tr><td>最新价</td><td style=\"font-weight: bold;\">${rtPrice}</td><td id=\"rt-boll-time\" rowspan=\"4\" style=\"vertical-align: middle; font-size: 12px;\">${_nowStr}${rtSrc ? ` <small style=\"color:#64748b\">(${rtSrc})</small>` : ''}</td><td style=\"font-size: 11px;\">突破UP: <span style=\"color: ${breakoutUpColor}; font-weight: bold;\">${breakoutUp}</span></td></tr>
+                            <tr><td>BOLL UP</td><td style=\"color: #ff6b6b; font-weight: bold;\">${rtUp}</td><td style=\"font-size: 11px;\">跌破DN: <span style=\"color: ${breakoutDnColor}; font-weight: bold;\">${breakoutDn}</span></td></tr>
+                            <tr><td>BOLL MA</td><td style=\"color: #4ecdc4; font-weight: bold;\">${rtMa}</td><td style=\"font-size: 11px;\">状态: <span style=\"color: ${statusColor}; font-weight: bold;\">${status}</span></td></tr>
+                            <tr><td>BOLL DN</td><td style=\"color: #45b7d1; font-weight: bold;\">${rtDn}</td><td></td></tr>
                           </table>
                         </div>
                        </div>`);
@@ -904,6 +944,34 @@ def _fetch_latest_price(symbol: str) -> Optional[float]:
 
 
 # === New: compute realtime (forming bar) BOLL based on last window-1 closed + current latest close ===
+def _get_strategy_status(db_path: str) -> Dict[str, Any]:
+    """获取策略状态"""
+    try:
+        with _connect(db_path) as conn:
+            cur = conn.execute(
+                "SELECT position, pending, breakout_up, breakout_dn FROM strategy_state ORDER BY ts DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                position, pending, breakout_up, breakout_dn = row
+                return {
+                    "breakout_up": bool(breakout_up) if breakout_up is not None else False,
+                    "breakout_dn": bool(breakout_dn) if breakout_dn is not None else False,
+                    "status": pending if pending else "NONE"
+                }
+            return {
+                "breakout_up": False,
+                "breakout_dn": False,
+                "status": "NONE"
+            }
+    except Exception:
+        return {
+            "breakout_up": False,
+            "breakout_dn": False,
+            "status": "NONE"
+        }
+
+
 def _get_realtime_boll(db_path: str, window: int, boll_multiplier: float, boll_ddof: int, symbol: Optional[str] = None) -> Dict[str, Any]:
     """
     计算实时BOLL：

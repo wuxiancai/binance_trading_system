@@ -51,7 +51,10 @@ CREATE TABLE IF NOT EXISTS strategy_state (
     position TEXT NOT NULL,
     pending TEXT,
     entry_price REAL,
-    breakout_level REAL
+    breakout_level REAL,
+    breakout_up INTEGER DEFAULT 0,
+    breakout_dn INTEGER DEFAULT 0,
+    last_close_price REAL
 );
 """
 
@@ -124,12 +127,12 @@ class DB:
             )
             await db.commit()
 
-    async def save_strategy_state(self, ts: int, position: str, pending: str = None, entry_price: float = None, breakout_level: float = None):
+    async def save_strategy_state(self, ts: int, position: str, pending: str = None, entry_price: float = None, breakout_level: float = None, breakout_up: bool = False, breakout_dn: bool = False, last_close_price: float = None):
         """保存策略状态"""
         async with aiosqlite.connect(self.path) as db:
             await db.execute(
-                "INSERT INTO strategy_state(ts, position, pending, entry_price, breakout_level) VALUES (?,?,?,?,?)",
-                (ts, position, pending, entry_price, breakout_level),
+                "INSERT INTO strategy_state(ts, position, pending, entry_price, breakout_level, breakout_up, breakout_dn, last_close_price) VALUES (?,?,?,?,?,?,?,?)",
+                (ts, position, pending, entry_price, breakout_level, int(breakout_up), int(breakout_dn), last_close_price),
             )
             await db.commit()
 
@@ -138,7 +141,7 @@ class DB:
         async with aiosqlite.connect(self.path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                "SELECT position, pending, entry_price, breakout_level FROM strategy_state ORDER BY ts DESC LIMIT 1"
+                "SELECT position, pending, entry_price, breakout_level, breakout_up, breakout_dn, last_close_price FROM strategy_state ORDER BY ts DESC LIMIT 1"
             ) as cursor:
                 row = await cursor.fetchone()
                 if row:
@@ -146,7 +149,10 @@ class DB:
                         'position': row['position'],
                         'pending': row['pending'],
                         'entry_price': row['entry_price'],
-                        'breakout_level': row['breakout_level']
+                        'breakout_level': row['breakout_level'],
+                        'breakout_up': bool(row['breakout_up']) if row['breakout_up'] is not None else False,
+                        'breakout_dn': bool(row['breakout_dn']) if row['breakout_dn'] is not None else False,
+                        'last_close_price': row['last_close_price']
                     }
                 return None
 
