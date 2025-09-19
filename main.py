@@ -163,6 +163,47 @@ async def main():
                 if not (cfg.api_key and cfg.api_secret):
                     return
 
+                # 模拟交易模式：只记录交易信号，不执行真实交易
+                if cfg.simulate_trading:
+                    logging.info(f"模拟交易模式 - 信号: {signal} @ {price}")
+                    try:
+                        if signal == "open_short":
+                            qty = cfg.simulate_balance * cfg.max_position_pct / price  # 模拟计算数量
+                            await db.log_trade(int(time.time()*1000), "SELL", qty, price, "SIMULATED", "FILLED")
+                            logging.info(f"模拟开空仓: {qty:.3f} @ {price}")
+                        elif signal == "open_long":
+                            qty = cfg.simulate_balance * cfg.max_position_pct / price  # 模拟计算数量
+                            await db.log_trade(int(time.time()*1000), "BUY", qty, price, "SIMULATED", "FILLED")
+                            logging.info(f"模拟开多仓: {qty:.3f} @ {price}")
+                        elif signal == "close_short_open_long":
+                            # 模拟平空仓+开多仓
+                            await db.log_trade(int(time.time()*1000), "BUY_CLOSE", 0, price, "SIMULATED", "FILLED")
+                            await db.update_trade_status_on_close("BUY_CLOSE")
+                            qty = cfg.simulate_balance * cfg.max_position_pct / price
+                            await db.log_trade(int(time.time()*1000), "BUY_OPEN", qty, price, "SIMULATED", "FILLED")
+                            logging.info(f"模拟平空开多: {qty:.3f} @ {price}")
+                        elif signal == "close_long_open_short":
+                            # 模拟平多仓+开空仓
+                            await db.log_trade(int(time.time()*1000), "SELL_CLOSE", 0, price, "SIMULATED", "FILLED")
+                            await db.update_trade_status_on_close("SELL_CLOSE")
+                            qty = cfg.simulate_balance * cfg.max_position_pct / price
+                            await db.log_trade(int(time.time()*1000), "SELL_OPEN", qty, price, "SIMULATED", "FILLED")
+                            logging.info(f"模拟平多开空: {qty:.3f} @ {price}")
+                        elif signal == "stop_loss_short":
+                            # 模拟空仓止损
+                            await db.log_trade(int(time.time()*1000), "BUY_STOP_LOSS", 0, price, "SIMULATED", "FILLED")
+                            await db.update_trade_status_on_close("BUY_STOP_LOSS")
+                            logging.info(f"模拟空仓止损 @ {price}")
+                        elif signal == "stop_loss_long":
+                            # 模拟多仓止损
+                            await db.log_trade(int(time.time()*1000), "SELL_STOP_LOSS", 0, price, "SIMULATED", "FILLED")
+                            await db.update_trade_status_on_close("SELL_STOP_LOSS")
+                            logging.info(f"模拟多仓止损 @ {price}")
+                    except Exception as e:
+                        logging.error(f"模拟交易记录失败: {e}")
+                    return
+
+                # 真实交易模式
                 try:
                     if signal == "open_short":
                         qty = trader.calc_qty(cfg.symbol, price, cfg.max_position_pct)

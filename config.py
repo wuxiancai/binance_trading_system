@@ -20,9 +20,9 @@ class Config:
     # ---------------------------
     # 交易所与订阅参数
     # ---------------------------
-    api_key: str = "00832d003a3d2f76c718ba02278363ec3be6abff352051e3c3b09ca0100b723f"                    # 币安 API Key（非干跑时必须）
-    api_secret: str = "523755dec380c497f8bec63929ba16f3918a15bac06a78c6535ef65f0d5aa523"                 # 币安 API Secret
-    use_testnet: bool = True              # 是否使用测试网：1/true 为测试网
+    api_key: str = "G5Z6Lv64080ByTgNcOXKvdwSRMsFDXvRlTnpMRnxJiFWlq8AFgThG95G0big5QGP"                    # 币安 API Key（非干跑时必须）
+    api_secret: str = "5ujlrFgBx1LQuVcYcxzWPxX6jjsaQ0CFC62MbvqZ20445zFxLfTq7b66AErJ3shea"                 # 币安 API Secret
+    use_testnet: bool = False             # 是否使用测试网：1/true 为测试网
     symbol: str = "BTCUSDT"              # 交易对（如 BTCUSDT）
     interval: str = "15m"               # K线周期（如 15m）
     window: int = 20                      # 布林带窗口期（默认 20）
@@ -35,6 +35,12 @@ class Config:
     leverage: int = 10                    # 杠杆倍数
     only_on_close: bool = False            # 仅在 K 线收盘时触发策略信号
     stop_loss_enabled: bool = True        # 是否在开仓后自动挂止损单
+    
+    # ---------------------------
+    # 模拟交易参数
+    # ---------------------------
+    simulate_trading: bool = True         # 是否启用模拟交易模式（不进行真实下单）
+    simulate_balance: float = 10000.0     # 模拟账户USDT余额
 
     # ---------------------------
     # 指标参数（布林带）
@@ -63,8 +69,8 @@ class Config:
     # ---------------------------
     # 端点配置（可用环境覆盖）
     # ---------------------------
-    ws_base: str = "wss://stream.binancefuture.com"  # 行情 WebSocket 基础地址（默认测试网 Futures Testnet 公共行情流）
-    rest_base: str = "https://testnet.binancefuture.com"  # REST 下单基础地址（默认测试网）
+    ws_base: str = "wss://fstream.binance.com"  # 行情 WebSocket 基础地址（正式网 Futures）
+    rest_base: str = "https://fapi.binance.com"  # REST 下单基础地址（正式网）
 
 
 def load_config() -> Config:
@@ -89,6 +95,10 @@ def load_config() -> Config:
     leverage = int(os.getenv("LEVERAGE") or defaults.leverage)
     only_on_close = str2bool(os.getenv("ONLY_ON_CLOSE"), defaults.only_on_close)
     stop_loss_enabled = str2bool(os.getenv("STOP_LOSS_ENABLED"), defaults.stop_loss_enabled)
+    
+    # 模拟交易
+    simulate_trading = str2bool(os.getenv("SIMULATE_TRADING"), defaults.simulate_trading)
+    simulate_balance = float(os.getenv("SIMULATE_BALANCE") or defaults.simulate_balance)
 
     # 指标参数
     boll_multiplier = float(os.getenv("BOLL_MULTIPLIER") or defaults.boll_multiplier)
@@ -139,6 +149,9 @@ def load_config() -> Config:
         leverage=leverage,
         only_on_close=only_on_close,
         stop_loss_enabled=stop_loss_enabled,
+        # 模拟交易
+        simulate_trading=simulate_trading,
+        simulate_balance=simulate_balance,
         # 指标
         boll_multiplier=boll_multiplier,
         boll_ddof=boll_ddof,
