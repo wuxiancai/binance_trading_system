@@ -150,9 +150,8 @@ async def main():
                     # 无仓位
                     state.position = "flat"
             except Exception as e:
-                logging.error(f"获取币安仓位失败，无法继续交易: {e}")
-                # 强制要求API成功，不允许回退
-                return
+                logging.warning(f"获取仓位信息失败: {e}")
+                # 继续执行策略逻辑，使用本地状态
 
         # 确保布林带指标有效才进行策略决策
         if up is not None and dn is not None:
