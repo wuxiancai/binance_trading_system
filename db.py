@@ -110,20 +110,33 @@ class DB:
             await db.commit()
 
     async def update_trade_status_on_close(self, close_side: str):
-        """当平仓时，将相关的开仓交易状态从NEW改为OVER"""
+        """当平仓/止损发生时，将最近一条对应方向的开仓记录标记为 OVER。
+        不再限定原始 status 必须为 NEW，允许 NEW/FILLED/其他，避免状态不匹配。
+        方向映射：
+        - 平多/多单止损(SELL_CLOSE/SELL_STOP_LOSS) -> 开多(BUY/BUY_OPEN)
+        - 平空/空单止损(BUY_CLOSE/BUY_STOP_LOSS) -> 开空(SELL/SELL_OPEN)
+        """
+        if close_side in ("SELL_CLOSE", "SELL_STOP_LOSS"):
+            open_sides = ("BUY", "BUY_OPEN")
+        elif close_side in ("BUY_CLOSE", "BUY_STOP_LOSS"):
+            open_sides = ("SELL", "SELL_OPEN")
+        else:
+            return
         async with aiosqlite.connect(self.path) as db:
-            # 根据平仓方向确定要更新的开仓方向
-            if close_side in ("SELL_CLOSE", "SELL"):  # 平多仓
-                open_sides = ("BUY", "BUY_OPEN")
-            elif close_side in ("BUY_CLOSE", "BUY"):  # 平空仓
-                open_sides = ("SELL", "SELL_OPEN")
-            else:
-                return
-            
-            # 更新最近的相关开仓交易状态为OVER
+            # 使用子查询选取最近一条未标记为OVER的开仓记录
             await db.execute(
-                "UPDATE trades SET status = 'OVER' WHERE side IN (?, ?) AND status = 'NEW' ORDER BY ts DESC LIMIT 1",
-                open_sides
+                """
+                UPDATE trades
+                SET status = 'OVER'
+                WHERE id = (
+                    SELECT id FROM trades
+                    WHERE side IN (?, ?)
+                      AND (status IS NULL OR status <> 'OVER')
+                    ORDER BY ts DESC
+                    LIMIT 1
+                )
+                """,
+                open_sides,
             )
             await db.commit()
 

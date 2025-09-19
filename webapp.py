@@ -492,7 +492,6 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
     app.config["SUMMARY_CFG"] = {
         "symbol": getattr(cfg, "symbol", None),
         "interval": getattr(cfg, "interval", None),
-        "use_testnet": getattr(cfg, "use_testnet", None),
         "leverage": getattr(cfg, "leverage", None),
         "max_position_pct": getattr(cfg, "max_position_pct", None),
         "window": getattr(cfg, "window", None),
@@ -503,7 +502,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         "log_level": getattr(cfg, "log_level", None),
         "db_path": getattr(cfg, "db_path", "trader.db"),
         # New: expose ws base for WS price feed
-        "ws_base": getattr(cfg, "ws_base", _default_ws_base(getattr(cfg, "use_testnet", True))),
+        "ws_base": getattr(cfg, "ws_base", "wss://fstream.binance.com"),
         # Optional: expose compute params
         "boll_multiplier": getattr(cfg, "boll_multiplier", 2.0),
         "boll_ddof": getattr(cfg, "boll_ddof", 0),
@@ -710,7 +709,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                          <table>
                            <tr><th>合约币对</th><td>${cfg.symbol}</td></tr>
                            <tr><th>K线时间窗口</th><td>${cfg.interval}</td></tr>
-                           <tr><th>Testnet</th><td>${boolCell(cfg.use_testnet)}</td></tr>
+                           
                            <tr><th>杠杆</th><td>${cfg.leverage}</td></tr>
                            <tr><th>最大仓位 %</th><td>${cfg.max_position_pct}</td></tr>
                            <tr><th>WINDOW</th><td>${cfg.window}</td></tr>
@@ -1091,14 +1090,15 @@ def _ensure_ws_price_feed(app: Flask) -> None:
     if _WS_PRICE_THREAD and _WS_PRICE_THREAD.is_alive():
         return
     c = app.config.get("SUMMARY_CFG", {})
-    ws_base = c.get("ws_base") or _default_ws_base(bool(c.get("use_testnet", True)))
+    ws_base = c.get("ws_base") or "wss://fstream.binance.com"
     symbol = c.get("symbol") or "BTCUSDT"
     interval = c.get("interval") or "1m"
+    ws_open_timeout = c.get("ws_open_timeout", 20)
 
     def _runner():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        client = WSClient(ws_base, symbol, interval)
+        client = WSClient(ws_base, symbol, interval, open_timeout=ws_open_timeout)
 
         async def on_kline(evt: KlineEvent):
             # Update forming bar close as realtime price
@@ -1107,6 +1107,12 @@ def _ensure_ws_price_feed(app: Flask) -> None:
                 _RT_PRICE["ts"] = int(time.time() * 1000)
         try:
             loop.run_until_complete(client.connect_and_listen(on_kline))
+        except asyncio.CancelledError:
+            # Graceful shutdown of WS thread (e.g., process exiting)
+            try:
+                loop.stop()
+            except Exception:
+                pass
         except Exception:
             # On exit or error just stop loop
             try:
@@ -1122,8 +1128,3 @@ def _ensure_ws_price_feed(app: Flask) -> None:
     t = threading.Thread(target=_runner, name="ws-price-feed", daemon=True)
     t.start()
     _WS_PRICE_THREAD = t
-
-
-# Helper: default ws base depending on testnet flag
-def _default_ws_base(use_testnet: bool) -> str:
-    return "wss://stream.binancefuture.com" if use_testnet else "wss://fstream.binance.com"

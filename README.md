@@ -131,7 +131,7 @@ python main.py
 
 ```bash
 # 设置环境变量
-export USE_TESTNET=1
+export SIMULATE_TRADING=1
 export SYMBOL=BTCUSDT
 export INTERVAL=15m
 
@@ -153,7 +153,7 @@ TZ=Asia/Shanghai          # 时区设置（用于日志显示）
 # API 配置（真实交易时必须配置）
 BINANCE_API_KEY=your_api_key_here      # 币安 API Key
 BINANCE_API_SECRET=your_api_secret_here # 币安 API Secret
-USE_TESTNET=1             # 1=测试网，0=主网
+SIMULATE_TRADING=1        # 1=模拟交易，0=真实交易
 SYMBOL=BTCUSDT            # 交易对
 INTERVAL=15m              # K线周期（1m/5m/15m/1h/4h/1d等）
 WINDOW=20                 # 布林带窗口期
@@ -194,7 +194,7 @@ STOP_LOSS_WORKING_TYPE=CONTRACT_PRICE  # 止损触发价格类型
 
 ##### 🔗 端点配置（高级用户）
 ```bash
-# 通常无需修改，系统会根据 USE_TESTNET 自动选择
+# 通常无需修改，已默认主网端点（如需自定义可手动覆盖 REST_BASE/WS_BASE）
 REST_BASE=                # REST API 基础地址（留空使用默认）
 WS_BASE=                  # WebSocket 基础地址（留空使用默认）
 ```
@@ -204,7 +204,7 @@ WS_BASE=                  # WebSocket 基础地址（留空使用默认）
 ##### 开发测试配置
 ```bash
 # 测试网 + 模拟交易
-USE_TESTNET=1
+SIMULATE_TRADING=1
 SYMBOL=BTCUSDT
 INTERVAL=15m
 WINDOW=20
@@ -219,7 +219,7 @@ LOG_LEVEL=DEBUG
 ##### 生产环境配置
 ```bash
 # 主网 + 真实交易（请确保 API Key 权限正确）
-USE_TESTNET=0
+SIMULATE_TRADING=0
 BINANCE_API_KEY=your_mainnet_api_key
 BINANCE_API_SECRET=your_mainnet_api_secret
 SYMBOL=BTCUSDT
@@ -304,7 +304,7 @@ sudo systemctl edit binance_trading_system
 
 # 在编辑器中添加环境变量
 [Service]
-Environment="USE_TESTNET=0"
+Environment="SIMULATE_TRADING=0"
 Environment="SYMBOL=ETHUSDT"
 Environment="INTERVAL=5m"
 
@@ -413,7 +413,7 @@ cp $HOME/binance_trading_system/.env /backup/env_$(date +%Y%m%d_%H%M%S).backup
    # 测试环境变量加载
    cd $HOME/binance_trading_system
    export $(grep -v '^#' .env | xargs)
-   echo $USE_TESTNET
+   echo $SIMULATE_TRADING
    
    # 验证配置是否正确
    python -c "from config import load_config; print(load_config())"
@@ -433,7 +433,7 @@ cp $HOME/binance_trading_system/.env /backup/env_$(date +%Y%m%d_%H%M%S).backup
    import os
    from config import load_config
    config = load_config()
-   print(f'使用测试网: {config.use_testnet}')
+   print(f'模拟交易模式: {config.simulate_trading}')
    print(f'API Key: {config.api_key[:10]}...')
    print(f'REST 端点: {config.rest_base}')
    "
@@ -508,7 +508,7 @@ try:
     config = load_config()
     print('✅ 配置加载成功')
     print(f'交易对: {config.symbol}')
-    print(f'测试网: {config.use_testnet}')
+    print(f'模拟交易: {config.simulate_trading}')
     print(f'杠杆: {config.leverage}')
 except Exception as e:
     print(f'❌ 配置错误: {e}')

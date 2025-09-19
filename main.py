@@ -56,7 +56,7 @@ async def main():
 
     # logging
     logging.basicConfig(level=getattr(logging, cfg.log_level, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
-    logging.info(f"Starting with config: testnet={cfg.use_testnet}, symbol={cfg.symbol}, interval={cfg.interval}")
+    logging.info(f"Starting with config: symbol={cfg.symbol}, interval={cfg.interval}")
 
     # tz
     tz = pytz.timezone(cfg.tz)
@@ -66,12 +66,12 @@ async def main():
     await db.init()
 
     # trader
-    trader = Trader(cfg.api_key, cfg.api_secret, cfg.rest_base, cfg.use_testnet,
-                    recv_window=cfg.recv_window,
-                    http_timeout=cfg.http_timeout,
-                    qty_precision=cfg.qty_precision,
-                    price_round=cfg.price_round,
-                    stop_loss_working_type=cfg.stop_loss_working_type)
+    trader = Trader(cfg.api_key, cfg.api_secret, cfg.rest_base,
+                     recv_window=cfg.recv_window,
+                     http_timeout=cfg.http_timeout,
+                     qty_precision=cfg.qty_precision,
+                     price_round=cfg.price_round,
+                     stop_loss_working_type=cfg.stop_loss_working_type)
     if cfg.api_key and cfg.api_secret:
         trader.apply_leverage(cfg.symbol, cfg.leverage)
 
@@ -112,7 +112,8 @@ async def main():
                   ping_interval=cfg.ws_ping_interval,
                   ping_timeout=cfg.ws_ping_timeout,
                   backoff_initial=cfg.ws_backoff_initial,
-                  backoff_max=cfg.ws_backoff_max)
+                  backoff_max=cfg.ws_backoff_max,
+                  open_timeout=getattr(cfg, 'ws_open_timeout', 20))
 
     state = StrategyState()
     # 从数据库加载最新的策略状态
@@ -139,8 +140,8 @@ async def main():
 
         price = k.close
 
-        # 从币安API获取实际仓位，确保交易决策基于真实仓位
-        if cfg.api_key and cfg.api_secret:
+        # 在非模拟模式下从币安API获取实际仓位，确保交易决策基于真实仓位
+        if (not cfg.simulate_trading) and cfg.api_key and cfg.api_secret:
             try:
                 actual_position = trader.get_position_info(cfg.symbol)
                 if actual_position is not None:
@@ -159,9 +160,6 @@ async def main():
             if signal:
                 await db.log_signal(int(time.time()*1000), signal, price)
                 logging.info(f"Signal: {signal} @ {price} (UP={up:.2f}, DN={dn:.2f})")
-
-                if not (cfg.api_key and cfg.api_secret):
-                    return
 
                 # 模拟交易模式：只记录交易信号，不执行真实交易
                 if cfg.simulate_trading:
@@ -201,6 +199,9 @@ async def main():
                             logging.info(f"模拟多仓止损 @ {price}")
                     except Exception as e:
                         logging.error(f"模拟交易记录失败: {e}")
+                    return
+
+                if not (cfg.api_key and cfg.api_secret):
                     return
 
                 # 真实交易模式

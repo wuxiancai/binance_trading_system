@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 import os
 from dataclasses import dataclass
+from typing import Optional
 
 
 def str2bool(v: str | None, default: bool = False) -> bool:
@@ -20,9 +22,8 @@ class Config:
     # ---------------------------
     # 交易所与订阅参数
     # ---------------------------
-    api_key: str = "G5Z6Lv64080ByTgNcOXKvdwSRMsFDXvRlTnpMRnxJiFWlq8AFgThG95G0big5QGP"                    # 币安 API Key（非干跑时必须）
-    api_secret: str = "5ujlrFgBx1LQuVcYcxzWPxX6jjsaQ0CFC62MbvqZ20445zFxLfTq7b66AErJ3shea"                 # 币安 API Secret
-    use_testnet: bool = False             # 是否使用测试网：1/true 为测试网
+    api_key: Optional[str] = None         # 币安 API Key（非干跑时必须）
+    api_secret: Optional[str] = None      # 币安 API Secret
     symbol: str = "BTCUSDT"              # 交易对（如 BTCUSDT）
     interval: str = "15m"               # K线周期（如 15m）
     window: int = 20                      # 布林带窗口期（默认 20）
@@ -33,7 +34,7 @@ class Config:
     stop_loss_pct: float = 0.02           # 止损百分比（0.02 表示 2%）
     max_position_pct: float = 0.1         # 单次最大仓位占可用 USDT 的比例（1.0 表示 100%）
     leverage: int = 10                    # 杠杆倍数
-    only_on_close: bool = False            # 仅在 K 线收盘时触发策略信号
+    only_on_close: bool = True            # 仅在 K 线收盘时触发策略信号（默认开启）
     stop_loss_enabled: bool = True        # 是否在开仓后自动挂止损单
     
     # ---------------------------
@@ -56,6 +57,8 @@ class Config:
     ws_ping_timeout: int = 60             # WS 心跳超时秒
     ws_backoff_initial: int = 1           # WS 重连初始回退秒
     ws_backoff_max: int = 60              # WS 重连最大回退秒
+    # 新增：连接打开超时（秒）
+    ws_open_timeout: int = 20
 
     # ---------------------------
     # 下单与网络参数
@@ -69,7 +72,7 @@ class Config:
     # ---------------------------
     # 端点配置（可用环境覆盖）
     # ---------------------------
-    ws_base: str = "wss://fstream.binance.com"  # 行情 WebSocket 基础地址（正式网 Futures）
+    ws_base: str = "wss://fstream.binance.com"   # 行情 WebSocket 基础地址（正式网 Futures）
     rest_base: str = "https://fapi.binance.com"  # REST 下单基础地址（正式网）
 
 
@@ -83,8 +86,8 @@ def load_config() -> Config:
     tz = os.getenv("TZ") or defaults.tz
 
     # 交易所与订阅
-    api_key = os.getenv("BINANCE_API_KEY", defaults.api_key)
-    api_secret = os.getenv("BINANCE_API_SECRET", defaults.api_secret)
+    api_key = os.getenv("BINANCE_API_KEY") or None
+    api_secret = os.getenv("BINANCE_API_SECRET") or None
     symbol = (os.getenv("SYMBOL") or defaults.symbol).upper()
     interval = os.getenv("INTERVAL") or defaults.interval
     window = int(os.getenv("WINDOW") or defaults.window)
@@ -110,6 +113,7 @@ def load_config() -> Config:
     ws_ping_timeout = int(os.getenv("WS_PING_TIMEOUT") or defaults.ws_ping_timeout)
     ws_backoff_initial = int(os.getenv("WS_BACKOFF_INITIAL") or defaults.ws_backoff_initial)
     ws_backoff_max = int(os.getenv("WS_BACKOFF_MAX") or defaults.ws_backoff_max)
+    ws_open_timeout = int(os.getenv("WS_OPEN_TIMEOUT") or defaults.ws_open_timeout)
 
     # 下单与网络
     recv_window = int(os.getenv("RECV_WINDOW") or defaults.recv_window)
@@ -118,18 +122,9 @@ def load_config() -> Config:
     price_round = int(os.getenv("PRICE_ROUND") or defaults.price_round)
     stop_loss_working_type = os.getenv("STOP_LOSS_WORKING_TYPE") or defaults.stop_loss_working_type
 
-    # 运行网络与端点
-    use_testnet = str2bool(os.getenv("USE_TESTNET"), defaults.use_testnet)
-    ws_base_env = os.getenv("WS_BASE")
-    rest_base_env = os.getenv("REST_BASE")
-    if ws_base_env:
-        ws_base = ws_base_env.rstrip("/")
-    else:
-        ws_base = defaults.ws_base if use_testnet else "wss://fstream.binance.com"
-    if rest_base_env:
-        rest_base = rest_base_env.rstrip("/")
-    else:
-        rest_base = defaults.rest_base if use_testnet else "https://fapi.binance.com"
+    # 端点（仅主网，支持显式覆盖）
+    ws_base = (os.getenv("WS_BASE") or defaults.ws_base).rstrip("/")
+    rest_base = (os.getenv("REST_BASE") or defaults.rest_base).rstrip("/")
 
     return Config(
         # 基础
@@ -139,7 +134,6 @@ def load_config() -> Config:
         # 交易所与订阅
         api_key=api_key,
         api_secret=api_secret,
-        use_testnet=use_testnet,
         symbol=symbol,
         interval=interval,
         window=window,
@@ -161,6 +155,8 @@ def load_config() -> Config:
         ws_ping_timeout=ws_ping_timeout,
         ws_backoff_initial=ws_backoff_initial,
         ws_backoff_max=ws_backoff_max,
+        # 新增
+        ws_open_timeout=ws_open_timeout,
         # 下单与网络
         recv_window=recv_window,
         http_timeout=http_timeout,

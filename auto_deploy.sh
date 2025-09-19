@@ -199,8 +199,8 @@ main() {
     echo
     echo "重要提醒:"
     echo "- 请务必修改 .env 文件中的 API 密钥等敏感信息"
-    echo "- 建议先在测试网环境下验证系统功能"
-    echo "- 生产环境请配置真实 API 密钥并设置 USE_TESTNET=0"
+    echo "- 建议先在模拟交易模式下验证系统功能（设置 SIMULATE_TRADING=1）"
+    echo "- 生产环境请配置真实 API 密钥，并将 SIMULATE_TRADING=0 以启用真实下单"
     echo
 }
 
