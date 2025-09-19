@@ -134,10 +134,8 @@ async def main():
             logging.info(f"等待更多K线数据，当前: {len(ind.df)}/{cfg.window + 1}")
             return
 
-        # 仅在K线收盘处理策略（可配置）
-        if cfg.only_on_close and not k.is_closed:
-            return
-
+        # 不再提前返回，而是将only_on_close/is_closed传入策略，由策略决定是否产生交易信号；
+        # 这样在未收盘时也能更新pending/突破状态并保存，供仪表盘展示
         price = k.close
 
         # 在非模拟模式下从币安API获取实际仓位，确保交易决策基于真实仓位
@@ -156,7 +154,9 @@ async def main():
 
         # 确保布林带指标有效才进行策略决策
         if up is not None and dn is not None:
-            signal = decide(price, up, dn, state)
+            signal = decide(price, up, dn, state,
+                            high_price=k.high, low_price=k.low,
+                            is_closed=k.is_closed, only_on_close=cfg.only_on_close)
             if signal:
                 await db.log_signal(int(time.time()*1000), signal, price)
                 logging.info(f"Signal: {signal} @ {price} (UP={up:.2f}, DN={dn:.2f})")
