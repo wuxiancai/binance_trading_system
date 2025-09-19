@@ -308,6 +308,18 @@ def _latest_price(db_path: str) -> Optional[float]:
     return None
 
 
+def _get_error_logs(db_path: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """获取错误日志记录"""
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            "SELECT ts, where_, error FROM errors ORDER BY ts DESC LIMIT ?", (limit,)
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        for r in rows:
+            r["ts_local"] = _fmt_ts(r["ts"])
+        return rows
+
+
 def _get_pnl_records(db_path: str, limit: int = 20) -> List[Dict[str, Any]]:
     """获取所有交易的盈亏记录"""
     records = []
@@ -515,6 +527,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
         trades = _recent_trades(db_path, limit=20)
         pnl_records = _get_pnl_records(db_path, limit=20)
         daily_stats = _get_daily_stats(db_path, days=7, trader=trader_obj)
+        error_logs = _get_error_logs(db_path, limit=30)
         # New: realtime boll
         rt_boll = _get_realtime_boll(db_path, c.get("window", 20), c.get("boll_multiplier", 2.0), c.get("boll_ddof", 0), symbol)
         # New: strategy status
@@ -532,6 +545,7 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
             "trades": trades,
             "pnl_records": pnl_records,
             "daily_stats": daily_stats,
+            "error_logs": error_logs,
         })
 
     @app.post("/api/test_order")
@@ -799,6 +813,24 @@ def create_app(cfg: Any, trader: Optional[Any] = None) -> Flask:
                           <table>
                             <tr><th style="width:28%">日期</th><th style="width:20%">次数</th><th style="width:26%">利润总和</th><th style="width:26%">利润率</th></tr>
                             ${statsRows}
+                          </table>
+                        </div>
+                       </div>`);
+
+                     // Error Logs (new card after daily stats)
+                     const logRows = (data.error_logs || []).map(log => {
+                       const errorText = log.error || '';
+                       const isError = errorText.toLowerCase().includes('error') || errorText.toLowerCase().includes('failed') || errorText.toLowerCase().includes('exception');
+                       const errorClass = isError ? 'err' : '';
+                       return `<tr><td>${log.ts_local}</td><td>${log.where_ || ''}</td><td><span class="${errorClass}">${errorText}</span></td></tr>`;
+                     }).join('');
+                     cards.push(`
+                       <div class="card">
+                         <h3>日志</h3>
+                        <div class="table-wrap">
+                          <table>
+                            <tr><th style="width:20%">时间</th><th style="width:25%">位置</th><th style="width:55%">错误信息</th></tr>
+                            ${logRows}
                           </table>
                         </div>
                        </div>`);
