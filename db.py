@@ -179,3 +179,22 @@ class DB:
                 rows = await cursor.fetchall()
                 # 返回升序排列的数据（最老的在前面）
                 return list(reversed(rows))
+
+    async def get_latest_closed_open_time(self):
+        """返回数据库中最新一根已收盘K线的open_time，若不存在返回None"""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT open_time FROM klines WHERE is_closed=1 ORDER BY open_time DESC LIMIT 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+                return int(row[0]) if row else None
+
+    async def get_recent_closed_klines(self, limit: int = 30):
+        """获取最近的已收盘K线数据，按时间升序返回"""
+        async with aiosqlite.connect(self.path) as db:
+            async with db.execute(
+                "SELECT open_time, close_time, open, high, low, close, volume FROM klines WHERE is_closed=1 ORDER BY open_time DESC LIMIT ?",
+                (limit,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return list(reversed(rows))

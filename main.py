@@ -3,6 +3,8 @@ import logging
 import os
 import time
 from datetime import datetime
+import json
+import urllib.request
 
 import pytz
 
@@ -48,6 +50,66 @@ def _load_env_file(path: str = ".env") -> None:
         pass
 
 
+def _interval_to_ms(interval: str) -> int:
+    try:
+        num = int(interval[:-1])
+        unit = interval[-1]
+        if unit == 'm':
+            return num * 60_000
+        if unit == 'h':
+            return num * 60 * 60_000
+        if unit == 'd':
+            return num * 24 * 60 * 60_000
+        return num  # already ms
+    except Exception:
+        return 15 * 60_000
+
+
+def _fetch_recent_klines_rest(rest_base: str, symbol: str, interval: str, limit: int = 300):
+    url = f"{rest_base.rstrip('/')}/fapi/v1/klines?symbol={symbol.upper()}&interval={interval}&limit={limit}"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            if resp.status != 200:
+                return []
+            data = json.loads(resp.read().decode('utf-8'))
+            now_ms = int(time.time() * 1000)
+            interval_ms = _interval_to_ms(interval)
+            out = []
+            for it in data:
+                ot = int(it[0])
+                ct = int(it[6]) if len(it) > 6 else (ot + interval_ms - 1)
+                is_closed = now_ms >= ct
+                out.append(KlineEvent(
+                    open_time=ot,
+                    close_time=ct,
+                    open=float(it[1]),
+                    high=float(it[2]),
+                    low=float(it[3]),
+                    close=float(it[4]),
+                    volume=float(it[5]),
+                    is_closed=is_closed
+                ))
+            return out
+    except Exception:
+        return []
+
+
+async def _backfill_recent_closed_klines(db: DB, cfg) -> int:
+    """从REST拉取最近一段K线，补齐DB缺失记录；返回写入条数"""
+    klines = _fetch_recent_klines_rest(cfg.rest_base, cfg.symbol, cfg.interval, limit=300)
+    if not klines:
+        return 0
+    written = 0
+    for k in klines:
+        try:
+            await db.insert_kline(k)
+            written += 1
+        except Exception:
+            continue
+    logging.info(f"REST回补K线完成，共写入 {written} 条（含覆盖）")
+    return written
+
+
 async def main():
     # Ensure .env variables are loaded before reading config
     _load_env_file()
@@ -64,6 +126,12 @@ async def main():
     # db
     db = DB(cfg.db_path)
     await db.init()
+
+    # 回补缺失的已收盘K线（最近300根）
+    try:
+        await _backfill_recent_closed_klines(db, cfg)
+    except Exception as e:
+        logging.warning(f"回补K线失败: {e}")
 
     # trader
     trader = Trader(cfg.api_key, cfg.api_secret, cfg.rest_base,
@@ -156,7 +224,9 @@ async def main():
         if up is not None and dn is not None:
             signal = decide(price, up, dn, state,
                             high_price=k.high, low_price=k.low,
-                            is_closed=k.is_closed, only_on_close=cfg.only_on_close)
+                            is_closed=k.is_closed, only_on_close=cfg.only_on_close,
+                            use_breakout_level_for_entry=getattr(cfg, 'use_breakout_level_for_entry', False),
+                            reentry_buffer_pct=getattr(cfg, 'reentry_buffer_pct', 0.0))
             if signal:
                 await db.log_signal(int(time.time()*1000), signal, price)
                 logging.info(f"Signal: {signal} @ {price} (UP={up:.2f}, DN={dn:.2f})")
@@ -186,7 +256,7 @@ async def main():
                             await db.update_trade_status_on_close("SELL_CLOSE")
                             qty = cfg.simulate_balance * cfg.max_position_pct / price
                             await db.log_trade(int(time.time()*1000), "SELL_OPEN", qty, price, "SIMULATED", "FILLED")
-                            logging.info(f"模拟平多开空: {qty:.3f} @ {price}")
+                            logging.info(f"模拟平空开空: {qty:.3f} @ {price}")
                         elif signal == "stop_loss_short":
                             # 模拟空仓止损
                             await db.log_trade(int(time.time()*1000), "BUY_STOP_LOSS", 0, price, "SIMULATED", "FILLED")

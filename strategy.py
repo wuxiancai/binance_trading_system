@@ -37,18 +37,24 @@ class StrategyState:
 
 def decide(close_price: float, up: float, dn: float, state: StrategyState,
            high_price: float | None = None, low_price: float | None = None,
-           is_closed: bool = True, only_on_close: bool = True) -> str | None:
+           is_closed: bool = True, only_on_close: bool = True,
+           use_breakout_level_for_entry: bool = False,
+           reentry_buffer_pct: float = 0.0) -> str | None:
     """
     基于布林带的突破回调策略（默认按K线收盘价确认），扩展支持影线突破；止损规则改为：
     - 空仓（short）：当实时价格 >= 开仓价 * 1.001 时，立即止损平仓；
     - 多仓（long）：当实时价格 <= 开仓价 * 0.999 时，立即止损平仓；
     止损动作与only_on_close无关，始终即时生效。
+
+    新增：
+    - use_breakout_level_for_entry: 回到轨内时使用“突破当时的上/下轨”阈值，而不是“当前最新上/下轨”。
+    - reentry_buffer_pct: 回到轨内的缓冲阈值（例如 0.001=0.1%），避免“刚好贴线”误触发。
     """
     # 检查关键参数是否为None，避免TypeError
     if up is None or dn is None:
         return None
 
-    # 原有：基于相邻收盘价的突破判定
+    # 原有：基于相邻收盘价的突破判定（可能在同一根形成中的K线仍用上一根收盘价作比较）
     if state.last_close_price is not None:
         if state.last_close_price <= up and close_price > up:
             state.breakout_up = True
@@ -56,11 +62,6 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
         elif state.last_close_price >= dn and close_price < dn:
             state.breakout_dn = True
             state.breakout_up = False
-        elif close_price <= up and close_price >= dn:
-            # 回到轨道内时，若无等待动作可重置突破标记
-            if state.pending is None:
-                state.breakout_up = False
-                state.breakout_dn = False
 
     # 新增：影线突破（同一根K线内高/低触及阈值）用于及时设置 pending
     if high_price is not None and high_price > up:
@@ -95,11 +96,21 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
                 state.last_close_price = close_price
             return "stop_loss_long"
 
-    # 1) 止损（原按上/下轨的逻辑已被上面替代）
     def _can_act() -> bool:
         return is_closed or (not only_on_close)
 
-    # 2) 首次开仓逻辑（flat）
+    # 计算回到轨内的有效阈值（根据配置选用突破时的轨或当前轨，并加入缓冲）
+    def _short_reentry_threshold() -> float:
+        base = state.breakout_level if (use_breakout_level_for_entry and state.breakout_level) else up
+        # 价格需回到 base 以下，并考虑 buffer
+        return base * (1 - max(0.0, reentry_buffer_pct))
+
+    def _long_reentry_threshold() -> float:
+        base = state.breakout_level if (use_breakout_level_for_entry and state.breakout_level) else dn
+        # 价格需回到 base 以上，并考虑 buffer
+        return base * (1 + max(0.0, reentry_buffer_pct))
+
+    # 先根据突破标记设置/更新 pending，再考虑是否清空突破标记。
     if state.position == "flat":
         # 标记等待开仓
         if state.breakout_up and state.pending != "waiting_short_entry":
@@ -110,7 +121,7 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             state.breakout_level = dn
 
         # 满足回调条件 -> 开仓（遵循 only_on_close 配置）
-        if state.pending == "waiting_short_entry" and close_price <= up and _can_act():
+        if state.pending == "waiting_short_entry" and close_price <= _short_reentry_threshold() and _can_act():
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
@@ -118,7 +129,7 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             if is_closed:
                 state.last_close_price = close_price
             return "open_short"
-        if state.pending == "waiting_long_entry" and close_price >= dn and _can_act():
+        if state.pending == "waiting_long_entry" and close_price >= _long_reentry_threshold() and _can_act():
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
@@ -127,13 +138,11 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
                 state.last_close_price = close_price
             return "open_long"
 
-    # 3) 持仓后的翻转逻辑
     elif state.position == "short":
-        # 跌破下轨后等待反弹确认（影线或收盘均可设置等待）
         if state.breakout_dn and state.pending != "waiting_long_confirm":
             state.pending = "waiting_long_confirm"
             state.breakout_level = dn
-        if state.pending == "waiting_long_confirm" and close_price >= dn and _can_act():
+        if state.pending == "waiting_long_confirm" and close_price >= _long_reentry_threshold() and _can_act():
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
@@ -146,7 +155,7 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
         if state.breakout_up and state.pending != "waiting_short_confirm":
             state.pending = "waiting_short_confirm"
             state.breakout_level = up
-        if state.pending == "waiting_short_confirm" and close_price <= up and _can_act():
+        if state.pending == "waiting_short_confirm" and close_price <= _short_reentry_threshold() and _can_act():
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
@@ -154,6 +163,11 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             if is_closed:
                 state.last_close_price = close_price
             return "close_long_open_short"
+
+    # 将“回到轨道内则清空突破标记”的处理延后：只有在当前没有等待动作时才清空，避免同一次tick内刚设置就被清空
+    if (close_price <= up and close_price >= dn) and (state.pending is None):
+        state.breakout_up = False
+        state.breakout_dn = False
 
     # 更新上一根“收盘价基准”：仅在K线收盘时更新
     if is_closed:

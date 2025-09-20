@@ -34,8 +34,12 @@ class Config:
     stop_loss_pct: float = 0.02           # 止损百分比（0.02 表示 2%）
     max_position_pct: float = 0.1         # 单次最大仓位占可用 USDT 的比例（1.0 表示 100%）
     leverage: int = 10                    # 杠杆倍数
-    only_on_close: bool = False           # 仅在 K 线收盘时触发策略信号（默认开启）
+    only_on_close: bool = False           # 仅在 K 线收盘时触发策略信号（默认关闭）
     stop_loss_enabled: bool = True        # 是否在开仓后自动挂止损单
+    # 新增：入场回归是否使用“突破当时的上/下轨”而不是“当前最新上/下轨”
+    use_breakout_level_for_entry: bool = False
+    # 新增：回到轨内缓冲阈值（例如 0.001 = 0.1% 才算真正回到轨内）
+    reentry_buffer_pct: float = 0.0
     
     # ---------------------------
     # 模拟交易参数
@@ -98,6 +102,8 @@ def load_config() -> Config:
     leverage = int(os.getenv("LEVERAGE") or defaults.leverage)
     only_on_close = str2bool(os.getenv("ONLY_ON_CLOSE"), defaults.only_on_close)
     stop_loss_enabled = str2bool(os.getenv("STOP_LOSS_ENABLED"), defaults.stop_loss_enabled)
+    use_breakout_level_for_entry = str2bool(os.getenv("USE_BREAKOUT_LEVEL_FOR_ENTRY"), defaults.use_breakout_level_for_entry)
+    reentry_buffer_pct = float(os.getenv("REENTRY_BUFFER_PCT") or defaults.reentry_buffer_pct)
     
     # 模拟交易
     simulate_trading = str2bool(os.getenv("SIMULATE_TRADING"), defaults.simulate_trading)
@@ -143,6 +149,8 @@ def load_config() -> Config:
         leverage=leverage,
         only_on_close=only_on_close,
         stop_loss_enabled=stop_loss_enabled,
+        use_breakout_level_for_entry=use_breakout_level_for_entry,
+        reentry_buffer_pct=reentry_buffer_pct,
         # 模拟交易
         simulate_trading=simulate_trading,
         simulate_balance=simulate_balance,
