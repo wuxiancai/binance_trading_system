@@ -39,10 +39,10 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
            high_price: float | None = None, low_price: float | None = None,
            is_closed: bool = True, only_on_close: bool = True) -> str | None:
     """
-    基于布林带的突破回调策略（默认按K线收盘价确认），扩展支持影线突破：
-    - 影线穿越阈值时，实时更新 pending 与突破标记，便于仪表盘展示；
-    - 当 only_on_close=True 时，开平仓与止损仍需在收盘价满足条件才返回信号；
-      当 only_on_close=False 时，满足条件即可立刻返回信号。
+    基于布林带的突破回调策略（默认按K线收盘价确认），扩展支持影线突破；止损规则改为：
+    - 空仓（short）：当实时价格 >= 开仓价 * 1.001 时，立即止损平仓；
+    - 多仓（long）：当实时价格 <= 开仓价 * 0.999 时，立即止损平仓；
+    止损动作与only_on_close无关，始终即时生效。
     """
     # 检查关键参数是否为None，避免TypeError
     if up is None or dn is None:
@@ -70,12 +70,10 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
         state.breakout_dn = True
         state.breakout_up = False
 
-    # 1) 止损（默认基于收盘确认；only_on_close=False 时允许盘中触发）
-    def _can_act() -> bool:
-        return is_closed or (not only_on_close)
-
-    if state.position == "short":
-        if close_price > up and _can_act():
+    # 止损逻辑（即时）：按开仓价±0.1%
+    STOP_PCT = 0.001
+    if state.position == "short" and state.entry_price is not None:
+        if close_price >= state.entry_price * (1 + STOP_PCT):
             state.position = "flat"
             state.pending = None
             state.entry_price = None
@@ -85,8 +83,8 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             if is_closed:
                 state.last_close_price = close_price
             return "stop_loss_short"
-    elif state.position == "long":
-        if close_price < dn and _can_act():
+    elif state.position == "long" and state.entry_price is not None:
+        if close_price <= state.entry_price * (1 - STOP_PCT):
             state.position = "flat"
             state.pending = None
             state.entry_price = None
@@ -96,6 +94,10 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             if is_closed:
                 state.last_close_price = close_price
             return "stop_loss_long"
+
+    # 1) 止损（原按上/下轨的逻辑已被上面替代）
+    def _can_act() -> bool:
+        return is_closed or (not only_on_close)
 
     # 2) 首次开仓逻辑（flat）
     if state.position == "flat":
