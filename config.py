@@ -25,7 +25,7 @@ class Config:
     api_key: Optional[str] = None         # 币安 API Key（非干跑时必须）
     api_secret: Optional[str] = None      # 币安 API Secret
     symbol: str = "BTCUSDT"              # 交易对（如 BTCUSDT）
-    interval: str = "15m"               # K线周期（如 15m）
+    interval: str = "1m"               # K线周期（如 15m）
     window: int = 20                      # 布林带窗口期（默认 20）
 
     # ---------------------------
