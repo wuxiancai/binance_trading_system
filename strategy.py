@@ -101,14 +101,12 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
 
     # 计算回到轨内的有效阈值（根据配置选用突破时的轨或当前轨，并加入缓冲）
     def _short_reentry_threshold() -> float:
-        base = state.breakout_level if (use_breakout_level_for_entry and state.breakout_level) else up
-        # 价格需回到 base 以下，并考虑 buffer
-        return base * (1 - max(0.0, reentry_buffer_pct))
+        # 使用“当前上轨”作为回到轨内阈值（不使用历史突破时的轨，也不添加缓冲）
+        return up
 
     def _long_reentry_threshold() -> float:
-        base = state.breakout_level if (use_breakout_level_for_entry and state.breakout_level) else dn
-        # 价格需回到 base 以上，并考虑 buffer
-        return base * (1 + max(0.0, reentry_buffer_pct))
+        # 使用“当前下轨”作为回到轨内阈值（不使用历史突破时的轨，也不添加缓冲）
+        return dn
 
     # 先根据突破标记设置/更新 pending，再考虑是否清空突破标记。
     if state.position == "flat":
@@ -120,8 +118,8 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             state.pending = "waiting_long_entry"
             state.breakout_level = dn
 
-        # 满足回调条件 -> 开仓（遵循 only_on_close 配置）
-        if state.pending == "waiting_short_entry" and close_price <= _short_reentry_threshold() and _can_act():
+        # 满足回调条件 -> 开仓（严格按收盘判断；要求收盘价重新“小于上轨/大于下轨”）
+        if state.pending == "waiting_short_entry" and is_closed and (close_price < _short_reentry_threshold()) and _can_act():
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
@@ -129,7 +127,7 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             if is_closed:
                 state.last_close_price = close_price
             return "open_short"
-        if state.pending == "waiting_long_entry" and close_price >= _long_reentry_threshold() and _can_act():
+        if state.pending == "waiting_long_entry" and is_closed and (close_price > _long_reentry_threshold()) and _can_act():
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
@@ -142,7 +140,8 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
         if state.breakout_dn and state.pending != "waiting_long_confirm":
             state.pending = "waiting_long_confirm"
             state.breakout_level = dn
-        if state.pending == "waiting_long_confirm" and close_price >= _long_reentry_threshold() and _can_act():
+        # 反手做多：严格按收盘，收盘价 > 当前下轨
+        if state.pending == "waiting_long_confirm" and is_closed and (close_price > _long_reentry_threshold()) and _can_act():
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
@@ -155,7 +154,8 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
         if state.breakout_up and state.pending != "waiting_short_confirm":
             state.pending = "waiting_short_confirm"
             state.breakout_level = up
-        if state.pending == "waiting_short_confirm" and close_price <= _short_reentry_threshold() and _can_act():
+        # 反手做空：严格按收盘，收盘价 < 当前上轨
+        if state.pending == "waiting_short_confirm" and is_closed and (close_price < _short_reentry_threshold()) and _can_act():
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
@@ -164,8 +164,9 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
                 state.last_close_price = close_price
             return "close_long_open_short"
 
-    # 将“回到轨道内则清空突破标记”的处理延后：只有在当前没有等待动作时才清空，避免同一次tick内刚设置就被清空
-    if (close_price <= up and close_price >= dn) and (state.pending is None):
+    # 将“回到轨道内则清空突破标记”的处理延后：仅当K线收盘且当前没有等待动作时才清空，
+    # 这样在未收盘阶段，一旦出现影线突破，UI 会保持显示 YES 直到收盘。
+    if is_closed and (close_price <= up and close_price >= dn) and (state.pending is None):
         state.breakout_up = False
         state.breakout_dn = False
 
