@@ -34,9 +34,11 @@ sudo apt install -y \
     python3-setuptools \
     python3-wheel
 
-# 升级 pip 和安装基础包
-echo "[4/4] 升级 pip 和安装基础包..."
-python3 -m pip install --user --upgrade pip setuptools wheel
+# 验证 Python 包管理工具
+echo "[4/4] 验证 Python 包管理工具..."
+# Ubuntu 24.04 使用 externally-managed-environment，不需要手动升级系统 pip
+echo "系统 pip 版本: $(python3 -m pip --version)"
+echo "注意: 项目将在虚拟环境中安装依赖，无需升级系统 pip"
 
 # 验证安装
 echo "=== 验证安装结果 ==="

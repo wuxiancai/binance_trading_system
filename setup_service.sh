@@ -28,8 +28,7 @@ WorkingDirectory=${DEPLOY_DIR}
 Environment=PYTHONPATH=${DEPLOY_DIR}
 Environment=PYTHONUNBUFFERED=1
 ExecStart=${DEPLOY_DIR}/.venv/bin/python ${DEPLOY_DIR}/main.py
-Environment="PYENV_ROOT=${HOME}/.pyenv"
-Environment="PATH=${HOME}/.pyenv/bin:${HOME}/.pyenv/shims:/usr/local/bin:/usr/bin:/bin"
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=10
