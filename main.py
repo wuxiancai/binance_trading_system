@@ -116,8 +116,34 @@ async def main():
 
     cfg = load_config()
 
-    # logging
-    logging.basicConfig(level=getattr(logging, cfg.log_level, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+    # logging - 配置为 UTC+8 时区
+    import logging.handlers
+    
+    # 创建自定义的时间格式化器，使用 UTC+8 时区
+    class UTC8Formatter(logging.Formatter):
+        def formatTime(self, record, datefmt=None):
+            # 使用 UTC+8 时区格式化时间
+            dt = datetime.fromtimestamp(record.created, tz=pytz.timezone('Asia/Shanghai'))
+            if datefmt:
+                return dt.strftime(datefmt)
+            else:
+                return dt.strftime('%Y-%m-%d %H:%M:%S')
+    
+    # 配置日志格式
+    formatter = UTC8Formatter("%(asctime)s %(levelname)s %(message)s")
+    
+    # 获取根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, cfg.log_level, logging.INFO))
+    
+    # 清除现有的处理器
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # 添加控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
     logging.info(f"Starting with config: symbol={cfg.symbol}, interval={cfg.interval}")
 
     # tz
