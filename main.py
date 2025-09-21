@@ -197,9 +197,12 @@ async def main():
         if k.is_closed and (ma is not None):
             await db.upsert_indicator(k.open_time, ma, std, up, dn)
 
-        # 检查是否有足够的K线数据（至少21根）才执行交易
-        if len(ind.df) < cfg.window + 1:  # window=20, 所以需要至少21根
-            logging.info(f"等待更多K线数据，当前: {len(ind.df)}/{cfg.window + 1}")
+        # 计算“实时BOLL”：最近 window-1 根已收盘 + 当前形成中的最新价(k.close)
+        rt_ma, rt_std, rt_up, rt_dn = ind.compute_realtime_boll(k.close)
+
+        # 检查是否有足够的K线数据（至少支持实时BOLL计算）才执行交易
+        if rt_up is None or rt_dn is None:
+            logging.info(f"等待更多K线数据以计算实时BOLL… 当前: {len(ind.df)} 行")
             return
 
         # 不再提前返回，而是将only_on_close/is_closed传入策略，由策略决定是否产生交易信号；
@@ -221,15 +224,15 @@ async def main():
                 # 继续执行策略逻辑，使用本地状态
 
         # 确保布林带指标有效才进行策略决策
-        if up is not None and dn is not None:
-            signal = decide(price, up, dn, state,
-                            high_price=k.high, low_price=k.low,
-                            is_closed=k.is_closed, only_on_close=cfg.only_on_close,
-                            use_breakout_level_for_entry=getattr(cfg, 'use_breakout_level_for_entry', False),
-                            reentry_buffer_pct=getattr(cfg, 'reentry_buffer_pct', 0.0))
+        if rt_up is not None and rt_dn is not None:
+            signal = decide(price, rt_up, rt_dn, state,
+                             high_price=k.high, low_price=k.low,
+                             is_closed=k.is_closed, only_on_close=cfg.only_on_close,
+                             use_breakout_level_for_entry=getattr(cfg, 'use_breakout_level_for_entry', False),
+                             reentry_buffer_pct=getattr(cfg, 'reentry_buffer_pct', 0.0))
             if signal:
                 await db.log_signal(int(time.time()*1000), signal, price)
-                logging.info(f"Signal: {signal} @ {price} (UP={up:.2f}, DN={dn:.2f})")
+                logging.info(f"Signal: {signal} @ {price} (RT_UP={rt_up:.2f}, RT_DN={rt_dn:.2f})")
 
                 # 模拟交易模式：只记录交易信号，不执行真实交易
                 if cfg.simulate_trading:
@@ -340,8 +343,8 @@ async def main():
                     logging.error(f"order failed: {e}")
                     await db.log_error(int(time.time()*1000), "order", str(e))
         else:
-            logging.debug(f"布林带指标未就绪，跳过策略决策 (UP={up}, DN={dn})")
-            
+            logging.debug(f"实时BOLL未就绪，跳过策略决策 (RT_UP={rt_up}, RT_DN={rt_dn})")
+        
         # 保存策略状态
         await db.save_strategy_state(
             int(time.time()*1000), 

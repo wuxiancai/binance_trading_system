@@ -34,7 +34,7 @@ class Config:
     stop_loss_pct: float = 0.02           # 止损百分比（0.02 表示 2%）
     max_position_pct: float = 0.1         # 单次最大仓位占可用 USDT 的比例（1.0 表示 100%）
     leverage: int = 10                    # 杠杆倍数
-    only_on_close: bool = False           # 仅在 K 线收盘时触发策略信号（默认关闭）
+    only_on_close: bool = True           # 仅在 K 线收盘时触发策略信号（默认关闭）
     stop_loss_enabled: bool = True        # 是否在开仓后自动挂止损单
     # 新增：入场回归是否使用“突破当时的上/下轨”而不是“当前最新上/下轨”
     use_breakout_level_for_entry: bool = False

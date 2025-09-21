@@ -4,7 +4,7 @@ from dataclasses import dataclass
 class StrategyState:
     position: str = "flat"  # flat | long | short
     pending: str | None = None  # waiting_short_entry | waiting_long_entry | waiting_short_confirm | waiting_long_confirm
-    entry_price: float | None = None  # 开仓价格，用于止损计算
+    entry_price: float | None = None  # 开仓价格，用于止损计算（此实现不再使用百分比止损）
     breakout_level: float | None = None  # 最近一次突破时的关键价位（上轨或下轨），用于提示/记录
     # 新增突破状态跟踪
     breakout_up: bool = False  # 是否突破上轨
@@ -41,74 +41,48 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
            use_breakout_level_for_entry: bool = False,
            reentry_buffer_pct: float = 0.0) -> str | None:
     """
-    基于布林带的突破回调策略（默认按K线收盘价确认），扩展支持影线突破；止损规则改为：
-    - 空仓（short）：当实时价格 >= 开仓价 * 1.001 时，立即止损平仓；
-    - 多仓（long）：当实时价格 <= 开仓价 * 0.999 时，立即止损平仓；
-    止损动作与only_on_close无关，始终即时生效。
+    实时BOLL策略（符合用户描述）：
+    - 启动时 flat。
+    - 价格 > 实时BOLL UP：标记 突破UP=YES，pending=waiting_short_entry；当价格再次 < 实时BOLL UP，立即开空。
+    - 空仓持有时：若价格 > 实时BOLL UP，立即止损平仓；若价格 < 实时BOLL DN，标记 跌破DN=YES，pending=waiting_long_confirm；当价格再次 > 实时BOLL DN，立即平空并同时开多。
+    - 价格 < 实时BOLL DN：标记 突破DN=YES，pending=waiting_long_entry；当价格再次 > 实时BOLL DN，立即开多。
+    - 多仓持有时：若价格 < 实时BOLL DN，立即止损平仓；若价格 > 实时BOLL UP，pending=waiting_short_confirm；当价格再次 < 实时BOLL UP，立即平多并开空。
 
-    新增：
-    - use_breakout_level_for_entry: 回到轨内时使用“突破当时的上/下轨”阈值，而不是“当前最新上/下轨”。
-    - reentry_buffer_pct: 回到轨内的缓冲阈值（例如 0.001=0.1%），避免“刚好贴线”误触发。
+    注：此逻辑对入场/出场/止损均“即时生效”，不依赖K线收盘；only_on_close 参数对这些动作不再生效，仅保留以兼容旧代码。
     """
-    # 检查关键参数是否为None，避免TypeError
+    # 保护：BOLL 不可用时不动作
     if up is None or dn is None:
         return None
 
-    # 原有：基于相邻收盘价的突破判定（可能在同一根形成中的K线仍用上一根收盘价作比较）
-    if state.last_close_price is not None:
-        if state.last_close_price <= up and close_price > up:
-            state.breakout_up = True
-            state.breakout_dn = False
-        elif state.last_close_price >= dn and close_price < dn:
-            state.breakout_dn = True
-            state.breakout_up = False
+    # 使用当前价格与实时BOLL判断突破标志（影线与当前价任一满足即可）
+    broke_up = (close_price > up) or (high_price is not None and high_price > up)
+    broke_dn = (close_price < dn) or (low_price is not None and low_price < dn)
 
-    # 新增：影线突破（同一根K线内高/低触及阈值）用于及时设置 pending
-    if high_price is not None and high_price > up:
+    if broke_up:
         state.breakout_up = True
         state.breakout_dn = False
-    if low_price is not None and low_price < dn:
+    if broke_dn:
         state.breakout_dn = True
         state.breakout_up = False
 
-    # 止损逻辑（即时）：按开仓价±0.1%
-    STOP_PCT = 0.001
-    if state.position == "short" and state.entry_price is not None:
-        if close_price >= state.entry_price * (1 + STOP_PCT):
+    # —— 止损（立即）：以实时BOLL作为止损线 ——
+    if state.position == "short":
+        if close_price > up:  # 上穿上轨 -> 空仓止损
             state.position = "flat"
             state.pending = None
             state.entry_price = None
             state.breakout_level = None
-            state.breakout_up = False
-            state.breakout_dn = False
-            if is_closed:
-                state.last_close_price = close_price
+            # 不清空突破标志，交由后续逻辑/收盘清理
             return "stop_loss_short"
-    elif state.position == "long" and state.entry_price is not None:
-        if close_price <= state.entry_price * (1 - STOP_PCT):
+    elif state.position == "long":
+        if close_price < dn:  # 下穿下轨 -> 多仓止损
             state.position = "flat"
             state.pending = None
             state.entry_price = None
             state.breakout_level = None
-            state.breakout_up = False
-            state.breakout_dn = False
-            if is_closed:
-                state.last_close_price = close_price
             return "stop_loss_long"
 
-    def _can_act() -> bool:
-        return is_closed or (not only_on_close)
-
-    # 计算回到轨内的有效阈值（根据配置选用突破时的轨或当前轨，并加入缓冲）
-    def _short_reentry_threshold() -> float:
-        # 使用“当前上轨”作为回到轨内阈值（不使用历史突破时的轨，也不添加缓冲）
-        return up
-
-    def _long_reentry_threshold() -> float:
-        # 使用“当前下轨”作为回到轨内阈值（不使用历史突破时的轨，也不添加缓冲）
-        return dn
-
-    # 先根据突破标记设置/更新 pending，再考虑是否清空突破标记。
+    # —— 开仓/反手逻辑（即时，不等待收盘）——
     if state.position == "flat":
         # 标记等待开仓
         if state.breakout_up and state.pending != "waiting_short_entry":
@@ -118,59 +92,49 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
             state.pending = "waiting_long_entry"
             state.breakout_level = dn
 
-        # 满足回调条件 -> 开仓（严格按收盘判断；要求收盘价重新“小于上轨/大于下轨”）
-        if state.pending == "waiting_short_entry" and is_closed and (close_price < _short_reentry_threshold()) and _can_act():
+        # 满足回调条件 -> 立即开仓（使用“当前实时BOLL阈值”）
+        if state.pending == "waiting_short_entry" and (close_price < up):
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
             state.breakout_up = False
-            if is_closed:
-                state.last_close_price = close_price
             return "open_short"
-        if state.pending == "waiting_long_entry" and is_closed and (close_price > _long_reentry_threshold()) and _can_act():
+        if state.pending == "waiting_long_entry" and (close_price > dn):
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
             state.breakout_dn = False
-            if is_closed:
-                state.last_close_price = close_price
             return "open_long"
 
     elif state.position == "short":
+        # 下破DN后，等待回到DN之上确认反手
         if state.breakout_dn and state.pending != "waiting_long_confirm":
             state.pending = "waiting_long_confirm"
             state.breakout_level = dn
-        # 反手做多：严格按收盘，收盘价 > 当前下轨
-        if state.pending == "waiting_long_confirm" and is_closed and (close_price > _long_reentry_threshold()) and _can_act():
+        if state.pending == "waiting_long_confirm" and (close_price > dn):
             state.position = "long"
             state.pending = None
             state.entry_price = close_price
             state.breakout_dn = False
-            if is_closed:
-                state.last_close_price = close_price
             return "close_short_open_long"
 
     elif state.position == "long":
+        # 上破UP后，等待回到UP之下确认反手
         if state.breakout_up and state.pending != "waiting_short_confirm":
             state.pending = "waiting_short_confirm"
             state.breakout_level = up
-        # 反手做空：严格按收盘，收盘价 < 当前上轨
-        if state.pending == "waiting_short_confirm" and is_closed and (close_price < _short_reentry_threshold()) and _can_act():
+        if state.pending == "waiting_short_confirm" and (close_price < up):
             state.position = "short"
             state.pending = None
             state.entry_price = close_price
             state.breakout_up = False
-            if is_closed:
-                state.last_close_price = close_price
             return "close_long_open_short"
 
-    # 将“回到轨道内则清空突破标记”的处理延后：仅当K线收盘且当前没有等待动作时才清空，
-    # 这样在未收盘阶段，一旦出现影线突破，UI 会保持显示 YES 直到收盘。
-    if is_closed and (close_price <= up and close_price >= dn) and (state.pending is None):
+    # 清空突破标记：仅在收盘且无等待动作且回到轨道内时清空，便于UI在盘中展示突破
+    if is_closed and (dn <= close_price <= up) and (state.pending is None):
         state.breakout_up = False
         state.breakout_dn = False
 
-    # 更新上一根“收盘价基准”：仅在K线收盘时更新
     if is_closed:
         state.last_close_price = close_price
     return None

@@ -32,11 +32,8 @@ fi
 # 创建虚拟环境
 echo "[3/7] 创建 Python 虚拟环境..."
 cd "$DEPLOY_DIR"
-# 确保使用 pyenv 管理的 Python
-export PYENV_ROOT="$HOME/.pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
-eval "$(pyenv init -)"
-python -m venv .venv
+# 使用系统自带的 Python 创建虚拟环境
+python3 -m venv .venv
 
 # 安装 Python 依赖
 echo "[4/7] 安装 Python 依赖..."

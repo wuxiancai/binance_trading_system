@@ -162,16 +162,14 @@ main() {
     # 执行部署步骤
     execute_step "环境配置" "$SCRIPT_DIR/setup_environment.sh"
     
-    # 重新加载环境变量以使用 pyenv
-    log_info "重新加载 Python 环境"
-    export PYENV_ROOT="$HOME/.pyenv"
-    export PATH="$PYENV_ROOT/bin:$PATH"
-    if command -v pyenv >/dev/null 2>&1; then
-        eval "$(pyenv init -)"
-        log_success "pyenv 环境已加载"
+    # 验证系统 Python 环境
+    log_info "验证系统 Python 环境"
+    if command -v python3 >/dev/null 2>&1; then
+        PYTHON_VERSION=$(python3 --version 2>&1 | cut -d' ' -f2)
+        log_success "系统 Python 版本: $PYTHON_VERSION"
     else
-        log_warning "pyenv 未找到，请重新登录后再次运行部署脚本"
-        log_info "或者手动执行: source ~/.bashrc 或 source ~/.zshrc"
+        log_error "系统未找到 python3，请检查环境配置"
+        exit 1
     fi
     echo
     
