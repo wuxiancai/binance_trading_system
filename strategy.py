@@ -58,6 +58,12 @@ def decide(close_price: float, up: float, dn: float, state: StrategyState,
     broke_up = (close_price > up) or (high_price is not None and high_price > up)
     broke_dn = (close_price < dn) or (low_price is not None and low_price < dn)
 
+    # 记录突破检测的详细信息（用于调试）
+    if broke_up and not state.breakout_up:
+        print(f"🔴 检测到突破上轨: 价格={close_price:.2f}, 上轨={up:.2f}, 高点={high_price}")
+    if broke_dn and not state.breakout_dn:
+        print(f"🔵 检测到跌破下轨: 价格={close_price:.2f}, 下轨={dn:.2f}, 低点={low_price}")
+
     if broke_up:
         state.breakout_up = True
         state.breakout_dn = False

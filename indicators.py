@@ -39,16 +39,31 @@ class Indicator:
     # === New: compute realtime BOLL using last window-1 closed closes + current forming close ===
     def compute_realtime_boll(self, current_close: float) -> tuple[float|None, float|None, float|None, float|None]:
         """
-        返回基于“最近 window-1 根已收盘K线 + 当前形成中的最新价(current_close)”计算的实时BOLL。
-        当已收盘K线数量不足 window-1 时返回 (None, None, None, None)。
+        返回基于"最近 window-1 根已收盘K线 + 当前形成中的最新价(current_close)"计算的实时BOLL。
+        当已收盘K线数量不足时，尝试使用所有可用的已收盘K线 + 当前价格。
         """
         closed_df = self.df[self.df["is_closed"] == True]
-        if len(closed_df) < max(0, self.window - 1):
+        
+        # 如果已收盘K线数量不足window，但至少有一些数据，仍然计算
+        if len(closed_df) == 0:
             return None, None, None, None
-        closes = list(closed_df["close"].tail(max(0, self.window - 1)).astype(float)) + [float(current_close)]
+        
+        # 使用所有可用的已收盘K线，但不超过window-1根
+        available_closes = min(len(closed_df), max(1, self.window - 1))
+        closes = list(closed_df["close"].tail(available_closes).astype(float)) + [float(current_close)]
+        
+        # 至少需要2个数据点才能计算标准差
+        if len(closes) < 2:
+            return None, None, None, None
+            
         s = pd.Series(closes, dtype="float64")
         ma = s.mean()
         std = s.std(ddof=self.boll_ddof)
+        
+        # 如果标准差为0或NaN，返回None
+        if pd.isna(std) or std == 0:
+            return None, None, None, None
+            
         up = ma + self.boll_multiplier * std
         dn = ma - self.boll_multiplier * std
         return float(ma), float(std), float(up), float(dn)

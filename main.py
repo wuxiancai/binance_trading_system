@@ -223,13 +223,17 @@ async def main():
         if k.is_closed and (ma is not None):
             await db.upsert_indicator(k.open_time, ma, std, up, dn)
 
-        # 计算“实时BOLL”：最近 window-1 根已收盘 + 当前形成中的最新价(k.close)
+        # 计算"实时BOLL"：最近 window-1 根已收盘 + 当前形成中的最新价(k.close)
         rt_ma, rt_std, rt_up, rt_dn = ind.compute_realtime_boll(k.close)
 
         # 检查是否有足够的K线数据（至少支持实时BOLL计算）才执行交易
         if rt_up is None or rt_dn is None:
-            logging.info(f"等待更多K线数据以计算实时BOLL… 当前: {len(ind.df)} 行")
+            logging.info(f"等待更多K线数据以计算实时BOLL… 当前: {len(ind.df)} 行, 已收盘: {len(ind.df[ind.df['is_closed']==True])} 行")
             return
+
+        # 添加调试信息：每10根K线输出一次BOLL值和价格对比
+        if len(ind.df) % 10 == 0 or not k.is_closed:
+            logging.info(f"📊 BOLL调试 - 价格: {k.close:.2f}, UP: {rt_up:.2f}, DN: {rt_dn:.2f}, 状态: {state.position}, 等待: {state.pending}")
 
         # 不再提前返回，而是将only_on_close/is_closed传入策略，由策略决定是否产生交易信号；
         # 这样在未收盘时也能更新pending/突破状态并保存，供仪表盘展示
